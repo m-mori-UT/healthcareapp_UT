@@ -17,7 +17,7 @@ plt.gray()
 
 #OCRで使うソフトウェアを設定
 #tesseract win binary(64bit)を導入した
-#pyocrに対応したOCRソフトとしてtesseractだけがインストールされている想定する
+#pyocrに対応したOCRソフトとしてtesseractだけがインストールされていることを想定する
 TOOLS = pyocr.get_available_tools()
 TOOL = TOOLS[0]
 
