@@ -24,7 +24,7 @@
 1. Git Clone
 
    ```shell
-   git clone https://github.com/hszhao/semseg.git
+   git https://github.com/HMAdachi-THK/healthcareapp-stepsreader.git
    ```
 
 2. データ準備
