@@ -5,7 +5,7 @@
 ヘルスケアアプリ歩数読取ツール（以下、本ツール）は、iPhoneのヘルスケアアプリに表示される歩数の棒グラフを画像解析し、日々の歩数をExcelに書き出すツールです。
 
 <div align='center'>
-<img src="./data/iPhone11Pro.png" title='歩数の棒グラフのイメージ' height="450" />
+<img src="./data_sample/iPhone11Pro.png" title='歩数の棒グラフのイメージ' height="450" />
 </div>
 
 ### Requirement
