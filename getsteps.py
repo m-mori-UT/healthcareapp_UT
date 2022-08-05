@@ -72,7 +72,7 @@ class StepsImage():
         self.filepath = filepath
         #self.filename = os.path.basename(self.filepath)
         self.fileext = os.path.splitext(self.filepath)[1].lower()
-        #cv2.imreadは日本語ファイル名読めない....
+        #cv2.imreadは日本語ファイル名を読めない
         #self.img_org = cv2.imread(self.filepath)
         self.img_org = cv2.imdecode(np.fromfile(self.filepath, dtype=np.uint8), cv2.IMREAD_COLOR)
         self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)
@@ -99,7 +99,7 @@ class StepsImage():
             bool: True 旧レイアウト, False 新レイアウト
         """
 
-        #ピンク系の色が存在している場合、旧レイアウトとみなす（やや雑な判定）
+        #ピンク系の色が存在している場合、旧レイアウトとみなす
         img_hsv = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2HSV)
         img_pink = np.where((img_hsv[:,:,0] > 120) & (img_hsv[:,:,1] > 160) & (img_hsv[:,:,2] > 220) , 0, 255)
         cnt = np.count_nonzero(img_pink == 0)
@@ -313,7 +313,7 @@ def orange_other_binarization(img):
     """
 
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    #オレンジ系の色（Hが0～60度）、その他はmagic number...
+    #オレンジ系の色（Hが0～60度）、これらの数値は結果がうまくいくようにチューニングする
     return np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 10) & (img_hsv[:,:,2] > 60) , 0, 255)
 
 def write_csv(path, header, data, encoding='utf8'):
@@ -435,7 +435,7 @@ def main(image):
 if __name__== '__main__':
     start_time = time.time()
 
-    #処理対象ファイルリスト（jpgは厳しい...）
+    #処理対象ファイルリスト
     types = ('/*.png', '/*.jpg', '/*.jpeg')
     #types = ('/*.jpg', '/*.jpeg')
     files = []
