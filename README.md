@@ -10,7 +10,7 @@
 
 ### Requirement
 * Windows OS (64 bit) (Windows 10で動作確認済)
-* Python 3.8 (3.8.10で動作確認済)
+* Python 3.6 (3.6.13で動作確認済)
 * Pythonパッケージ
   ```shell
   pip install -r requirements.txt
