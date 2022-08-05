@@ -16,7 +16,7 @@ from PIL import Image
 plt.gray()
 
 #OCRで使うソフトウェアを設定
-#足立の環境ではtesseract win binary(64bit)を導入した
+#tesseract win binary(64bit)を導入した
 #pyocrに対応したOCRソフトとしてtesseractだけがインストールされている想定する
 TOOLS = pyocr.get_available_tools()
 TOOL = TOOLS[0]
