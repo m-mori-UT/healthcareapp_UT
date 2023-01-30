@@ -161,11 +161,9 @@ class StepsImage():
         center = self.img_org.shape[1]//2
         right_edge_ver_line = self.img_org[:, center-10:center+10]
 
-        cv2.imwrite('img_org.png', self.img_org)
-
         #画像のほとんどが黒い場合は２値化の条件を緩める
         if stats.mode(right_edge_ver_line) == 0:
-            th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
+            th_min, th_max, bin_mode = (250, 255, cv2.THRgESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
             _, img_bin = cv2.threshold(self.img_org_gray, th_min, th_max, bin_mode)
 
         #黒線（１ピクセル）が入っている１番目～２番目の位置
