@@ -81,10 +81,10 @@ class StepsImage():
         #self.img_org = cv2.imread(self.filepath)
         self.img_org = cv2.imdecode(np.fromfile(self.filepath, dtype=np.uint8), cv2.IMREAD_COLOR)
         self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)
-
+        #最初のイメージの背景での上がどこにあるか検索している
         self.is_old_layout = self.__is_old_layout()
         self.is_dark_mode = self.__is_dark_mode()
-
+        #最初のイメージの背景での下がどこにあるか検索している
         self.top_region, self.graph_region = self.__get_region_y_range()
         self.img_top = self.img_org[self.top_region[0]:self.top_region[1], :]
         self.img_graph = self.img_org[self.graph_region[0]:self.graph_region[1], :]
@@ -118,11 +118,11 @@ class StepsImage():
         Returns
             bool: True ダークモード, False 通常モード
         """
-
+        #↓これは前のやつのとき白がダークと思われたかも？色みを替えたコード
         #_, img = cv2.threshold(self.img_org_gray, 254, 255, cv2.THRESH_BINARY)
         _, img = cv2.threshold(self.img_org_gray, 128, 255, cv2.THRESH_BINARY)
-
-        return (cv2.countNonZero(img)/img.size < 0.1)
+        #0.1から0.3に変更：@11/27
+        return (cv2.countNonZero(img)/img.size < 0.3)
 
     def __get_binary_image(self, img):
         """白黒2値データを取得する
@@ -157,12 +157,11 @@ class StepsImage():
             (list, list) -- ([グラフより上の部分のy軸From, To], [グラフ部分のy軸From, To])
         """
 
-        #スクリーンショットの右端縦方向に各領域の切れ目が入っていることに着目する
-        th_min, th_max, bin_mode = (240, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
-        #th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
-        _, img_bin = cv2.threshold(self.img_org_gray, th_min, th_max, bin_mode)
-        #right_edge_ver_line = img_bin[:, img_bin.shape[1]-1]
-        right_edge_ver_line = img_bin[:, img_bin.shape[1]-2]
+        #どこからスタートしているかの縦の線（どこから色を探しているか）
+        center = self.img_org.shape[1]//2
+        right_edge_ver_line = self.img_org[:, center-10:center+10]
+
+        cv2.imwrite('img_org.png', self.img_org)
 
         #画像のほとんどが黒い場合は２値化の条件を緩める
         if stats.mode(right_edge_ver_line) == 0:
@@ -170,27 +169,46 @@ class StepsImage():
             _, img_bin = cv2.threshold(self.img_org_gray, th_min, th_max, bin_mode)
 
         #黒線（１ピクセル）が入っている１番目～２番目の位置
-        top_index, bottom_index = 1, 2
-        point_ = np.where(right_edge_ver_line == self.BIN_BLACK)[0]
+        #7,11→2,7に変更した@11/20
+        #top_index, bottom_index = (2, 7) if not self.is_dark_mode else (3, -2)
+        #top_index, bottom_index = 7, 11
+        #light_lines = np.where((right_edge_ver_line == [242, 241, 241]) |
+                    #(right_edge_ver_line == [246, 242, 242]))[0]
+        #白ではないけど白っぽい
+        light_lines = np.where((right_edge_ver_line <self.BIN_WHITE) &
+                    (right_edge_ver_line > [230, 230, 230]))[0]
+        dark_lines = np.where((right_edge_ver_line > self.BIN_BLACK) &
+                    (right_edge_ver_line < [30, 30, 30]))[0]
+                    
+    
 
-        #境界線のピクセルが連続する場合を考慮した上で分割する
-        begin_idx, pre_idx, end_idx = point_[0], point_[-1], 0
-        rep_points = []
-        for idx in point_:
-            if (idx - pre_idx) <= 1:
-                pre_idx = idx
-                continue
-            end_idx = pre_idx
-            rep_points.append([begin_idx, end_idx])
-            begin_idx, pre_idx = idx, idx
-        else:
-            rep_points.append([begin_idx, idx])
+        def get_rep_points(point_):
+            #境界線のピクセルが連続する場合を考慮した上で分割する
+            begin_idx, pre_idx, end_idx = point_[0], point_[-1], 0
+            rep_points = []
+            for idx in point_:
+                if (idx - pre_idx) <= 1:
+                    pre_idx = idx
+                    continue
+                end_idx = pre_idx
+                rep_points.append([begin_idx, end_idx])
+                begin_idx, pre_idx = idx, idx
+            else:
+                rep_points.append([begin_idx, idx])
+            #重要:10を引いてる意味：右の数字を探そうとしてる
+            #他の画像で上手くいかなかったらここをいじる（例：-10⇒-20とか）
+            #携帯の高さによって変わるかもしれない？
+            return rep_points
 
-        top_y = rep_points[top_index][1]
-        bottom_y = rep_points[bottom_index][0]
+        rep_points = get_rep_points(light_lines if not self.is_dark_mode else dark_lines)
+        img_orange = orange_other_binarization(self.img_org)
+        orange_rep_points = get_rep_points(np.where(img_orange == self.BIN_BLACK)[0])
+        max_range = max(rep[1] - rep[0] for rep in orange_rep_points)
+        top_y_orange, bottom_y = [rep for rep in orange_rep_points if rep[1] - rep[0] == max_range][0]
+        top_y = max(rep[1] for rep in rep_points if rep[1] < top_y_orange) - 20
 
         #平均歩数や期間の領域, グラフの領域
-        return [0, top_y - 1], [top_y + 1, bottom_y - 1]
+        return [0, top_y - 1], [top_y + 1, bottom_y + 10 - 1]
 
     def __graph_info(self):
         """棒グラフ部分の情報を取得する
@@ -210,8 +228,11 @@ class StepsImage():
         #グラフの底辺部分
         bin_ = orange_other_binarization(self.img_graph)
         bin_black = np.where(bin_ == self.BIN_BLACK)
-        bottom_y = max(bin_black[0])
-        #bottom = np.where(bin_[bottom_y, :] == self.BIN_BLACK)[0]
+        #グラフの一番下にある黒い色を探してる
+        #オレンジが一番多い行の中で一番下の行
+        #棒が短すぎると、オレンジ色が下の線とぶつけ合う
+        #なので、max(bin_black[0])はバグってしまう（OSが新しくなったからではなく、もともとかも？）
+        bottom_y, _ = sorted(zip(*np.unique(bin_black[0], return_counts=True)), key=lambda c:(c[1],c[0]), reverse=True)[0]
         bottom = np.where(bin_[bottom_y, :] == self.BIN_BLACK)[0]
 
         #棒の高さを取得する
@@ -233,15 +254,16 @@ class StepsImage():
             bar_x_ranges.append([begin_idx, idx, height(begin_idx, idx)])
 
         #グラフ領域のx軸範囲
-        graph_bottom = np.where(self.img_bin_graph[bottom_y, :] == self.BIN_BLACK)[0]
-
+        graph_bottom = np.where(self.img_bin_graph[bottom_y-2:bottom_y+2, :].transpose() == self.BIN_BLACK)[0]
+        #
         pre_idx = graph_bottom[0]
         for idx in graph_bottom:
             if 1 < (idx - pre_idx):
                 graph_x_range = [graph_bottom[0], pre_idx]
                 break
             pre_idx = idx
-
+        else:
+            graph_x_range = [graph_bottom[0], pre_idx]
         #グラフ領域のy軸範囲
         non_bar_center = bar_x_ranges[0][1] + int((bar_x_ranges[1][0] - bar_x_ranges[0][1])/2)
         center_space_black = np.where(self.img_bin_graph[:, non_bar_center] == self.BIN_BLACK)[0]
@@ -296,13 +318,13 @@ def get_label_y_region(img_graph, start_x):
         (int, int): (y軸From, To)
     """
     #走査する部分を切り出した画像中の黒ドット部分の座標
-    search_img = img_graph[:, start_x:]
+    search_img = img_graph[:, start_x+2:]
     black = np.unique(np.where(search_img == StepsImage.BIN_BLACK)[0])
 
     #画像最上部から下方向に走査する
     pre_idx = black[0]
     for idx in black:
-        if 5 < idx - pre_idx:
+        if 4 < idx - pre_idx:
             #多少バッファを見る
             return 0, pre_idx + 7
         pre_idx = idx
@@ -319,7 +341,7 @@ def orange_other_binarization(img):
 
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     #オレンジ系の色（Hが0～60度）、これらの数値は結果がうまくいくようにチューニングする
-    return np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 10) & (img_hsv[:,:,2] > 60) , 0, 255)
+    return np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 10) & (img_hsv[:,:,2] > 60), 0, 255)
 
 def write_csv(path, header, data, encoding='utf8'):
     """CSV出力する
@@ -407,7 +429,7 @@ def main(image):
     #heightが31個になるように棒のない箇所の高さをゼロとして補完する
     bar_width = image.bar_x_ranges[0][1] - image.bar_x_ranges[0][0] + 1
     graph_width = image.graph_x_range[1] - image.graph_x_range[0] - 1
-    space_width = graph_width- bar_width*31
+    space_width = graph_width- bar_width*StepsImage.BIN_NUMBER
     space_unit = int(space_width/StepsImage.BIN_NUMBER)
     edge_space = int(space_width/StepsImage.BIN_NUMBER/2)
     b_s_width = bar_width + space_unit
@@ -490,9 +512,7 @@ if __name__== '__main__':
 
             if image.is_old_layout:
                 raise AttributeError('Old layout.')
-
             img_period, period, img_label, label, max_height_pixel, heights = main(image)
-
             #OCRした部分の画像を出力
             img_period_path = _IMG_PERIOD_DIR + '/' + filename
             img_label_path = _IMG_LABEL_DIR + '/' + filename
