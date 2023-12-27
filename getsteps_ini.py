@@ -8,6 +8,7 @@ import configparser
 import argparse
 import traceback
 import openpyxl
+import itertools
 
 import numpy as np
 import cv2
@@ -19,6 +20,7 @@ plt.gray()
 #OCRで使うソフトウェアを設定
 #tesseract win binary(64bit)を導入した
 #pyocrに対応したOCRソフトとしてtesseractだけがインストールされていることを想定する
+#pyocrにTesseractを指定する。
 pyocr.tesseract.TESSERACT_CMD = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
 TOOLS = pyocr.get_available_tools()
 TOOL = TOOLS[0]
@@ -44,7 +46,7 @@ _IMG_ERROR_DIR = config['PATH']['Img_error_dir']
 _IMG_OLDLAYOUT_DIR = config['PATH']['Img_oldlayout_dir']
 # %%
 
-class StepsImage():
+class StepsImage():#Attributes:→クラス内で定義された変数のこと
     """歩数の画像クラス
 
     Attributes:
@@ -63,10 +65,10 @@ class StepsImage():
 
     BIN_BLACK = 0
     BIN_WHITE = 255
-    #グラフにつき31個のbinがある
+    #グラフにつき31個のbinがある（1日～31日？）
     BIN_NUMBER = 31
 
-    def __init__(self, filepath):
+    def __init__(self, filepath):#インスタンス化メソッド#第一引数は自インスタンス(self)
         """コンストラクタ
 
         Arguments:
@@ -80,7 +82,7 @@ class StepsImage():
         #cv2.imreadは日本語ファイル名を読めない
         #self.img_org = cv2.imread(self.filepath)
         self.img_org = cv2.imdecode(np.fromfile(self.filepath, dtype=np.uint8), cv2.IMREAD_COLOR)
-        self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)
+        self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)#読み込んだ画像をグレースケール化
         #最初のイメージの背景での上がどこにあるか検索している
         self.is_old_layout = self.__is_old_layout()
         self.is_dark_mode = self.__is_dark_mode()
@@ -104,6 +106,7 @@ class StepsImage():
             bool: True 旧レイアウト, False 新レイアウト
         """
 
+        #BGRーHSV色空間の変換：色相(H),彩度(S),明度(V)
         #ピンク系の色が存在している場合、旧レイアウトとみなす
         img_hsv = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2HSV)
         img_pink = np.where((img_hsv[:,:,0] > 120) & (img_hsv[:,:,1] > 160) & (img_hsv[:,:,2] > 220) , 0, 255)
@@ -120,7 +123,7 @@ class StepsImage():
         """
         #↓これは前のやつのとき白がダークと思われたかも？色みを替えたコード
         #_, img = cv2.threshold(self.img_org_gray, 254, 255, cv2.THRESH_BINARY)
-        _, img = cv2.threshold(self.img_org_gray, 128, 255, cv2.THRESH_BINARY)
+        _, img = cv2.threshold(self.img_org_gray, 128, 255, cv2.THRESH_BINARY)#閾値以下の値を「0」それ以外の値を「最大値」として変換する方法？
         #0.1から0.3に変更：@11/27
         return (cv2.countNonZero(img)/img.size < 0.3)
 
@@ -159,11 +162,13 @@ class StepsImage():
 
         #どこからスタートしているかの縦の線（どこから色を探しているか）
         center = self.img_org.shape[1]//2
-        right_edge_ver_line = self.img_org[:, center-10:center+10]
+        self.right_edge_ver_line = self.img_org[:, center-10:center+10]
+
+        cv2.imwrite('img_org.png', self.img_org)
 
         #画像のほとんどが黒い場合は２値化の条件を緩める
-        if stats.mode(right_edge_ver_line) == 0:
-            th_min, th_max, bin_mode = (250, 255, cv2.THRgESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
+        if stats.mode(self.right_edge_ver_line) == 0:
+            th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
             _, img_bin = cv2.threshold(self.img_org_gray, th_min, th_max, bin_mode)
 
         #黒線（１ピクセル）が入っている１番目～２番目の位置
@@ -173,12 +178,28 @@ class StepsImage():
         #light_lines = np.where((right_edge_ver_line == [242, 241, 241]) |
                     #(right_edge_ver_line == [246, 242, 242]))[0]
         #白ではないけど白っぽい
-        light_lines = np.where((right_edge_ver_line <self.BIN_WHITE) &
-                    (right_edge_ver_line > [230, 230, 230]))[0]
-        dark_lines = np.where((right_edge_ver_line > self.BIN_BLACK) &
-                    (right_edge_ver_line < [30, 30, 30]))[0]
-                    
-    
+
+        def get_black_pixels_per_line(image):
+            non_255_values = np.where(image < 255)
+            color_values_by_pixel = itertools.groupby(zip(*non_255_values), lambda x: (x[0], x[1]))
+            black_pixels =  [(row, col) for (row, col), group in color_values_by_pixel if len(list(group)) == 3]
+            black_pixels_per_line = [(row, len(list(group))) for row, group in itertools.groupby(black_pixels, lambda x: x[0])]
+            return black_pixels_per_line
+        
+        colors_per_row = self.right_edge_ver_line.shape[1]
+        def get_dark_lines(image):
+            black_pixels_per_line = get_black_pixels_per_line(image)
+            return [r_index for r_index, pixel_count in black_pixels_per_line if pixel_count / colors_per_row >= 0.5]
+        
+        self.light_image =  np.where((self.right_edge_ver_line < self.BIN_WHITE) &
+                    (self.right_edge_ver_line > 225) &
+                    (self.right_edge_ver_line < 250), 0, 255)
+        light_image_lines = get_dark_lines(self.light_image)
+
+        self.dark_image = np.where((self.right_edge_ver_line > self.BIN_BLACK) &
+                    (self.right_edge_ver_line < 30) &
+                    (self.right_edge_ver_line > 5), 0, 255)
+        dark_image_lines = get_dark_lines(self.dark_image)
 
         def get_rep_points(point_):
             #境界線のピクセルが連続する場合を考慮した上で分割する
@@ -197,16 +218,16 @@ class StepsImage():
             #他の画像で上手くいかなかったらここをいじる（例：-10⇒-20とか）
             #携帯の高さによって変わるかもしれない？
             return rep_points
-
-        rep_points = get_rep_points(light_lines if not self.is_dark_mode else dark_lines)
-        img_orange = orange_other_binarization(self.img_org)
-        orange_rep_points = get_rep_points(np.where(img_orange == self.BIN_BLACK)[0])
+        
+        rep_points = get_rep_points(light_image_lines if not self.is_dark_mode else dark_image_lines)
+        self.img_orange = orange_other_binarization(self.img_org)
+        orange_rep_points = get_rep_points(np.where(self.img_orange == self.BIN_BLACK)[0])
         max_range = max(rep[1] - rep[0] for rep in orange_rep_points)
         top_y_orange, bottom_y = [rep for rep in orange_rep_points if rep[1] - rep[0] == max_range][0]
-        top_y = max(rep[1] for rep in rep_points if rep[1] < top_y_orange) - 20
+        top_y = max(rep[1] for rep in rep_points if rep[1] < top_y_orange + 5)
 
         #平均歩数や期間の領域, グラフの領域
-        return [0, top_y - 1], [top_y + 1, bottom_y + 10 - 1]
+        return [0, top_y - 1], [top_y + 1 - 20, bottom_y + 10 - 1]
 
     def __graph_info(self):
         """棒グラフ部分の情報を取得する
@@ -230,7 +251,8 @@ class StepsImage():
         #オレンジが一番多い行の中で一番下の行
         #棒が短すぎると、オレンジ色が下の線とぶつけ合う
         #なので、max(bin_black[0])はバグってしまう（OSが新しくなったからではなく、もともとかも？）
-        bottom_y, _ = sorted(zip(*np.unique(bin_black[0], return_counts=True)), key=lambda c:(c[1],c[0]), reverse=True)[0]
+        frequent_black = sorted(zip(*np.unique(bin_black[0], return_counts=True)), key=lambda c:(c[1],c[0]), reverse=True)
+        bottom_y,_ = max(frequent_black[:len(frequent_black)//10], key=lambda x: x[0])
         bottom = np.where(bin_[bottom_y, :] == self.BIN_BLACK)[0]
 
         #棒の高さを取得する
@@ -256,7 +278,7 @@ class StepsImage():
         #
         pre_idx = graph_bottom[0]
         for idx in graph_bottom:
-            if 1 < (idx - pre_idx):
+            if 5 < (idx - pre_idx):
                 graph_x_range = [graph_bottom[0], pre_idx]
                 break
             pre_idx = idx
@@ -305,7 +327,7 @@ def get_period_y_region(img_top):
             return idx - 1, img_top.shape[0] - 1
         pre_idx = idx
 
-def get_label_y_region(img_graph, start_x):
+def get_label_y_region(img_graph, start_x, end_x):
     """棒グラフの一番上の補助線のラベルのy軸From, Toを取得する
 
     Arguments:
@@ -316,7 +338,12 @@ def get_label_y_region(img_graph, start_x):
         (int, int): (y軸From, To)
     """
     #走査する部分を切り出した画像中の黒ドット部分の座標
-    search_img = img_graph[:, start_x+2:]
+    search_img = img_graph[:, start_x+2:end_x]
+    #0424次回この上から修正をするstart_xの計算式を見る
+    #import random
+    #name=str(random.randint(0,10000000))+".png"
+    #cv2.imwrite(name,search_img)
+    #print(name)
     black = np.unique(np.where(search_img == StepsImage.BIN_BLACK)[0])
 
     #画像最上部から下方向に走査する
@@ -326,6 +353,7 @@ def get_label_y_region(img_graph, start_x):
             #多少バッファを見る
             return 0, pre_idx + 7
         pre_idx = idx
+    raise ValueError("グラフのy範囲を見つけられなかった")
 
 def orange_other_binarization(img):
     """画像中のオレンジ系の箇所を黒, その他を白とする白黒2値に変換する
@@ -379,7 +407,7 @@ def initialize_dir(path):
     except IOError:
         print(f'[error]{path} is opened.')
 
-def main(image):
+def main(image: StepsImage):
     """メイン処理
 
     Arguments:
@@ -410,14 +438,16 @@ def main(image):
     #period_img = image.img_bin_top_ocr[period_top:period_bottom, 0:int(image.img_bin_top_ocr.shape[1]*2/3)]
     period_img = binarize_otsu(image.img_top[period_top:period_bottom, 0:int(image.img_bin_top_ocr.shape[1]*2/3)])
     period_text = TOOL.image_to_string(Image.fromarray(period_img),
-                                       lang='script/Japanese',
-                                       builder=pyocr.builders.TextBuilder(tesseract_layout=6))
+                                       lang='script/Japanese',#言語は日本語
+                                       builder=pyocr.builders.TextBuilder(tesseract_layout=6))#画像の文字を抽出
+    #tesseract_layoutは読み込みの精度を調節するプロパティで、0から10までの値を設定できる。文字一つ一つをブロックとして認識する6に設定。
     period_text = period_text.replace(' ','').replace('~', '～')
 
     #グラフの上限値をOCRする
-    label_top, label_bottom = get_label_y_region(image.img_bin_graph_ocr, image.graph_x_range[1])
+    # グラフ右の線（点線）から写真の右いっぱいではなくその左の半分くらいまでのregion area（閾値）の中で、ラベルの上下を探す
+    label_top, label_bottom = get_label_y_region(image.img_bin_graph_ocr, image.graph_x_range[1], (image.graph_x_range[1] + image.img_bin_graph_ocr.shape[1]) // 2)
     #label_img = image.img_bin_graph_ocr[label_top:label_bottom, graph_x_range[1]+1:]
-    label_img = binarize_otsu(image.img_graph[label_top:label_bottom, image.graph_x_range[1]+1:])
+    label_img = binarize_otsu(image.img_graph[label_top:label_bottom, image.graph_x_range[1]+1 - 50:])
     label_text = TOOL.image_to_string(Image.fromarray(label_img),
                                       lang='eng',
                                       builder=pyocr.builders.DigitBuilder(tesseract_layout=7))
@@ -466,6 +496,15 @@ if __name__== '__main__':
     files = []
     for type_ in types:
         files.extend(glob.glob(_DATA_DIR_PATH + type_))
+
+    base_files = ['0016530669_0013_001.jpg', '0016530671_0001_001.jpg', '0016530678_0001_001.jpg',
+'0016530686_0013_001.jpg', '0016530697_0001_001.jpg', '0016530729_0001_001.jpg',
+'0016530766_0001_001.jpg', '0016530776_0001_001.jpg', '0016530811_0001_001.jpg', 
+'0016530827_0013_001.jpg', '0016530830_0001_001.jpg', '0016530833_0013_001.jpg',
+'0016530840_0001_001.jpg', '0016530848_0013_001.jpg', '0016530868_0001_001.jpg',
+'0016530914_0001_001.jpg', '0016530927_0013_001.jpg', '0016530929_0001_001.jpg',]
+    
+    files = ['data_sample/Data_Kobe/' + base_file_name for base_file_name in base_files]
 
     #出力先フォルダの初期化
     for p in [_IMG_LABEL_DIR, _IMG_PERIOD_DIR, _IMG_SUCCESS_DIR, _IMG_ERROR_DIR, _IMG_OLDLAYOUT_DIR ]:
@@ -568,7 +607,10 @@ if __name__== '__main__':
 
         except Exception as e:
             exc_type, exc_obj, tb=sys.exc_info()
-            lineno=tb.tb_lineno
+            lineno=""
+            while tb is not None:
+                lineno +=str(tb.tb_lineno)+","
+                tb=tb.tb_next
             error_results.append(dict(zip(error_header, [filename, type(e), e.args[0], lineno])))
             if image is None:
                 shutil.copy(file_, _IMG_ERROR_DIR)
