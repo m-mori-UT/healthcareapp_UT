@@ -75,6 +75,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         Arguments:
             filepath (str): ファイルパス
         """
+
         #何度も呼び出し、さほどデータサイズも大きくないデータはクラス変数とする
         self.filepath = filepath
         #self.filename = os.path.basename(self.filepath)
@@ -82,7 +83,11 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         #cv2.imreadは日本語ファイル名を読めない
         #self.img_org = cv2.imread(self.filepath)
         self.img_org = cv2.imdecode(np.fromfile(self.filepath, dtype=np.uint8), cv2.IMREAD_COLOR)
-        self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)#読み込んだ画像をグレースケール化
+        # img_hsv = cv2. cvtColor(img_org, cv2. COLOR_BGR2HSV) #後に回す：明るさだけ変える方法を調べる
+        # self.img_org = cv2.cvtColor(img_hsv-img_hsv.min())/
+        # (img_hsv.max()-img_hsv.min(), cv2.COLOR_HSV2BGR) 
+        #読み込んだ画像をグレースケール形式に変換する
+        self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)
         #最初のイメージの背景での上がどこにあるか検索している
         self.is_old_layout = self.__is_old_layout()
         self.is_dark_mode = self.__is_dark_mode()
@@ -106,8 +111,9 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             bool: True 旧レイアウト, False 新レイアウト
         """
 
-        #ピンク系の色が存在している場合、旧レイアウトとみなす
-        img_hsv = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2HSV)#BGRーHSV色空間の変換：色相(H),彩度(S),明度(V)
+        # ピンク系の色が存在している場合、旧レイアウトとみなす
+        # BGRーHSV色空間の変換：色相(H),彩度(S),明度(V)
+        img_hsv = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2HSV)
         img_pink = np.where((img_hsv[:,:,0] > 120) & (img_hsv[:,:,1] > 160) & (img_hsv[:,:,2] > 220) , 0, 255)
         cnt = np.count_nonzero(img_pink == 0)
         if cnt > 500:
@@ -120,10 +126,10 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         Returns
             bool: True ダークモード, False 通常モード
         """
-        #↓これは前のやつのとき白がダークと思われたかも？色みを替えたコード
+        # ↓これは前のやつのとき白がダークと思われたかも？色みを替えたコード
         #_, img = cv2.threshold(self.img_org_gray, 254, 255, cv2.THRESH_BINARY)
-        _, img = cv2.threshold(self.img_org_gray, 128, 255, cv2.THRESH_BINARY)#閾値以下の値を「0」それ以外の値を「最大値」として変換する方法？
-        #0.1から0.3に変更：@11/27
+        # 閾値以下の値を「0」それ以外の値を「最大値」として変換する方法？
+        _, img = cv2.threshold(self.img_org_gray, 128, 255, cv2.THRESH_BINARY)
         return (cv2.countNonZero(img)/img.size < 0.3)
 
     def __get_binary_image(self, img):
@@ -136,7 +142,10 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             numpy.array -- 白黒2値データ
             numpy.array -- OCR用の白黒2値データ
         """
-
+        # 250のthresholdを上げると、ノイズのピクセルが多くなる
+        # jpegでは線と数字の周りに背景のはずなピクセルが少し暗くなるので
+        # thresholdに入り、ノイズピクセルになってしまう
+        # ですが、thresholdを下げたら、読取るべきな薄い灰色な線が読取れなくなってしまう
         th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (2, 255, cv2.THRESH_BINARY_INV)
         th_min_ocr, th_max_ocr, bin_mode_ocr = (230, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (35, 255, cv2.THRESH_BINARY_INV)
 
@@ -152,26 +161,6 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             (list, list) -- ([グラフの一番上の横線y座標から、写真の一番上まで], [グラフ下の横線から、グラフの一番上の横線のy座標まで])
         """
 
-        #行がどのくらい暗かったら線と認識するか（50％以上暗かったら線と認識）
-        #0.5の数字は写真によって調整する必要性が出てくるかもしれない（その場合0.5だと低い可能性）
-        #例えば、歩数がかなり多く棒グラフが上の線に触れるほど伸びていて黒ならば、0.5が低くなる→thresholdの数値を上げる
-        darkness_ratio_threshold = 0.5
-        
-        colors_per_row = self.img_org.shape[1]
-        def get_dark_lines(image):
-            """
-            Return: 黒がdarkness_ratio_thresholdより多い行のy座標
-            一番左から一番右に伸びる線を無視する(このせんは明らかにグラフの線ではない)
-            """
-            black_pixels_per_line = get_black_pixels_per_line(image)
-            return [r_index for r_index, pixel_count in enumerate(black_pixels_per_line) if darkness_ratio_threshold <= pixel_count / colors_per_row]
-
-        #デバックしやすいようにイメージを保存する
-        self.debug_image_lines, _ = self.__get_binary_image(self.img_org_gray)
-        cv2.imwrite('debug_img.jpg', self.debug_image_lines)
-        #変数に入っている情報は「横線のy座標」
-        horizontal_line_y_coordinates = get_dark_lines(self.debug_image_lines)
-        
         def get_rep_points(point_):
             """リストの中から連続の数字をグループ化している
             例）[1,2,3,223,224,225,226,1111,1112]→[[1,3],[223,226],[1111,1112]]にしている
@@ -188,26 +177,55 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             else:
                 rep_points.append([begin_idx, idx])
             return rep_points
-        #横の連続線を箱みたいに範囲をグループ化する
-        rep_points = get_rep_points(horizontal_line_y_coordinates)
-        # print(horizontal_line_y_coordinates)
-        # print(rep_points)
-        thin_horizontal_lines = list(filter(lambda x: x[1] - x[0] < 5, rep_points))
+        
+        thin_horizontal_lines = self._get_thin_horizontal_lines(get_rep_points)
         top_y = thin_horizontal_lines[0][1] if thin_horizontal_lines else 0
 
+        if top_y < 21:
+            raise ValueError('写真には横線が見つかりませんでした')
+
         #棒グラフ下のy座標を見つける
+        orange_rep_points = self._get_orange_regions(get_rep_points)
+        # 一番大きいオレンジ範囲（その画像において一番高い棒グラフ）をグラフと認識している
+        # 画像内にグラフ以外のオレンジ色がある可能性に対応の仕方
+        # オレンジ棒グラフの最下部のy座標
+        _, bottom_y = max(orange_rep_points, key=lambda r: r[1] - r[0])
+
+        #平均歩数や期間の領域, グラフの領域
+        return [0, top_y - 1], [top_y + 1 - 20, bottom_y + 10 - 1]
+    
+    def _get_thin_horizontal_lines(self, get_rep_points):
+        #行がどのくらい暗かったら線と認識するか（50％以上暗かったら線と認識）
+        #0.5の数字は写真によって調整する必要性が出てくるかもしれない（その場合0.5だと低い可能性）
+        #例えば、歩数がかなり多く棒グラフが上の線に触れるほど伸びていて黒ならば、0.5が低くなる→thresholdの数値を上げる
+        darkness_ratio_threshold = 0.5
+        
+        colors_per_row = self.img_org.shape[1]
+        def get_dark_lines(image):
+            """
+            Return: 黒がdarkness_ratio_thresholdより多い行のy座標
+            一番左から一番右に伸びる線を無視する(このせんは明らかにグラフの線ではない)
+            """
+            black_pixels_per_line = get_black_pixels_per_line(image)
+            return [r_index for r_index, pixel_count in enumerate(black_pixels_per_line) if darkness_ratio_threshold <= pixel_count / colors_per_row]
+
+        #デバックしやすいようにイメージを保存する
+        self.debug_image_lines, _ = self.__get_binary_image(self.img_org_gray)
+        #変数に入っている情報は「横線のy座標」
+        horizontal_line_y_coordinates = get_dark_lines(self.debug_image_lines)
+        
+        #横の連続線を箱みたいに範囲をグループ化する
+        rep_points = get_rep_points(horizontal_line_y_coordinates)
+        thin_horizontal_lines = list(filter(lambda x: x[1] - x[0] < 5, rep_points))
+
+        return thin_horizontal_lines
+
+    def _get_orange_regions(self, get_rep_points):
         #オレンジの色を判別している
         self.img_orange = orange_other_binarization(self.img_org)
         #オレンジ色がある範囲をグループ化している
         orange_rep_points = get_rep_points(np.where(self.img_orange == self.BIN_BLACK)[0])
-        #一番大きいオレンジ範囲（その画像において一番高い棒グラフ）をグラフと認識している
-        # 画像内にグラフ以外のオレンジ色がある可能性に対応の仕方
-        max_range = max(rep[1] - rep[0] for rep in orange_rep_points)
-        #オレンジ棒グラフの最下部のy座標
-        _, bottom_y = [rep for rep in orange_rep_points if rep[1] - rep[0] == max_range][0]
-
-        #平均歩数や期間の領域, グラフの領域
-        return [0, top_y - 1], [max(top_y + 1 - 20, 20), bottom_y + 10 - 1]
+        return orange_rep_points
 
     def __graph_info(self):
         """棒グラフ部分の情報を取得する
@@ -235,21 +253,20 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         #bottom_y行のオレンジピクセルのｘ座標
         bottom = np.where(bin_[bottom_y, :] == self.BIN_BLACK)[0]
 
-        graph_x_range = self.__get_graph_x_range()
-        bar_x_ranges = self.__get_bar_x_ranges(bottom, bottom_y, bin_black)
+        graph_x_range = self._get_graph_x_range()
+        bar_x_ranges = self._get_bar_x_ranges(bottom, bottom_y, bin_black)
 
-        top_y = self.__get_graph_top_y(bar_x_ranges)
+        top_y = self._get_graph_top_y(bar_x_ranges)
         graph_y_range = [top_y, bottom_y]
 
         return bar_x_ranges, graph_x_range, graph_y_range
 
-    def __get_graph_x_range(self):
+    def _get_graph_x_range(self):
         """グラフ領域のx軸範囲
         """
         # スクロールバーを無視するために、右の5%を切り落とす
         right_edge = (self.img_bin_graph.shape[1] * 95) // 100
         dark_pixel = get_black_pixels_per_line(self.img_bin_graph.transpose()[:right_edge])
-    
 
         # フォントサイズが大きい場合、グラフが短くなり、数字の黒味が30%までなる可能性がある
         darkness_threshold = 0.40
@@ -260,7 +277,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         #グラフの幅：一番左縦のｘ座標から一番右縦のｘ座標までを探している
         return graph_x_range
 
-    def __get_bar_x_ranges(self, bottom, bottom_y, bin_black):
+    def _get_bar_x_ranges(self, bottom, bottom_y, bin_black):
         """棒の高さを取得する
         """
         def height(begin_idx, end_idx):
@@ -282,7 +299,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
 
         return bar_x_ranges
 
-    def __get_graph_top_y(self, bar_x_ranges):
+    def _get_graph_top_y(self, bar_x_ranges):
         """グラフ領域のy軸範囲
         """
         def get_black_pixels_after_bar(bar_num):
@@ -297,7 +314,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         center_space_black = get_black_pixels_after_bar(bar_num=0)
         #点線がない場合は, 黒ドットは多くて30個程度だが, 点線がある場合は黒ドットは200個近く現れる
         #かなり少なめに見積もって100個を判定基準とする
-        #通称:点線があった場合は多分黒びくセルの量は100より多い
+        #通称:点線があった場合は多分黒ピクセルの量は100より多い
         #棒と棒の中心に縦点線が当たる場合、一つ右隣の棒と棒の中心を使う
         if 100 < len(center_space_black):
             center_space_black = get_black_pixels_after_bar(bar_num=1)
@@ -379,7 +396,7 @@ def get_black_pixels_per_line(image):
 
 def write_csv(path, header, data, encoding='utf8'):
     """CSV出力する
- 
+
     Args:
         path (str): CSVファイルパス
         header (numpy.array): ヘッダー
@@ -440,10 +457,18 @@ def extract_details(image: StepsImage):
         if image.is_dark_mode:
             o = cv2.bitwise_not(o)
         return o
+    
+    period_img, period_text = _get_period_img_and_text(image, binarize_otsu)
+    label_img, label_text = _get_label_img_and_text(image, binarize_otsu)
+    heights = _spread_bar_heights_across_date_range(image)
+    max_height_pixel = image.graph_y_range[1] - image.graph_y_range[0]
+
+    return period_img, period_text, label_img, label_text, max_height_pixel, heights
+
+def _get_period_img_and_text(image, binarize_otsu):
 
     #期間をOCRする
     period_top, period_bottom = get_period_y_region(image.img_bin_top_ocr)
-    #period_img = image.img_bin_top_ocr[period_top:period_bottom, 0:int(image.img_bin_top_ocr.shape[1]*2/3)]
     period_img = binarize_otsu(image.img_top[period_top:period_bottom, 0:int(image.img_bin_top_ocr.shape[1]*2/3)])
     period_text = TOOL.image_to_string(Image.fromarray(period_img),
                                        lang='script/Japanese',#言語は日本語
@@ -451,10 +476,14 @@ def extract_details(image: StepsImage):
     #tesseract_layoutは読み込みの精度を調節するプロパティで、0から10までの値を設定できる。文字一つ一つをブロックとして認識する6に設定。
     period_text = period_text.replace(' ','').replace('~', '～')
 
-    #グラフの上限値をOCRする
+    return period_img, period_text
+
+
+def _get_label_img_and_text(image, binarize_otsu):
+    #グラフの上
+    # 限値をOCRする
     # グラフ右の線（点線）から写真の右いっぱいではなくその左の半分くらいまでのregion area（閾値）の中で、ラベルの上下を探す
     label_top, label_bottom = get_label_y_region(image.img_bin_graph_ocr, image.graph_x_range[1], (image.graph_x_range[1] + image.img_bin_graph_ocr.shape[1]) // 2)
-    #label_img = image.img_bin_graph_ocr[label_top:label_bottom, graph_x_range[1]+1:]
     label_img = binarize_otsu(image.img_graph[label_top:label_bottom, image.graph_x_range[1]+1 :])
     label_text = TOOL.image_to_string(Image.fromarray(label_img),
                                       lang='eng',
@@ -462,6 +491,11 @@ def extract_details(image: StepsImage):
     label_text = label_text.replace(' ','').replace(',', '').replace('.', '')
     label_text = re.sub('[^0-9]', '', label_text)
 
+    return label_img, label_text
+
+
+def _spread_bar_heights_across_date_range(image):
+    
     #heightが31個になるように棒のない箇所の高さをゼロとして補完する
     bar_width = image.bar_x_ranges[0][1] - image.bar_x_ranges[0][0] + 1
     graph_width = image.graph_x_range[1] - image.graph_x_range[0] - 1
@@ -482,20 +516,7 @@ def extract_details(image: StepsImage):
         heights[j] = bar[2]
         j += 1
 
-    #高さが読めていない場合はバーのピクセルの高さを返す
-    height_unit = ''
-    max_height_pixel = image.graph_y_range[1] - image.graph_y_range[0]
-    #height_est = ['' for i in range(1, StepsImage.BIN_NUMBER+1)]
-    if label_text != '':
-        #1ピクセル当たりの棒の高さ(歩数)
-        height_unit = int(label_text)/max_height_pixel
-
-        #棒グラフの数値を推定する
-        #heights_est = heights*height_unit
-        #heights_est = np.round(heights).astype(np.int32).astype(np.unicode)
-
-    return period_img, period_text, label_img, label_text, max_height_pixel, heights
-
+    return heights
 
 def extract_image_details(index, file_, files, write_xl_args, error_results, error_header):
     filename = os.path.basename(file_)
@@ -652,8 +673,8 @@ def main():
     wb.save(_OUTPUT_EXCEL_PATH)
 
     #CSV出力
-    encoding_ = 'utf8'
-    #encoding_ = 'cp932'
+    encoding_ = 'cp932' #自分のPCがshift_jis使用であればcp932を使う必要がある（日本で多い）
+    # encoding_ = 'utf8' #グローバルスタンダード
     write_csv(_RESULT_CSV_PATH, header, results, encoding_)
     error_results = [error_results_map[index] for index in sorted(error_results_map)]
     write_csv(_ERROR_CSV_PATH, error_header, error_results, encoding_)
