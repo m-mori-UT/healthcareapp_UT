@@ -85,7 +85,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         self.img_org = cv2.imdecode(np.fromfile(self.filepath, dtype=np.uint8), cv2.IMREAD_COLOR)
         # img_hsv = cv2. cvtColor(img_org, cv2. COLOR_BGR2HSV) #後に回す：明るさだけ変える方法を調べる
         # self.img_org = cv2.cvtColor(img_hsv-img_hsv.min())/
-        # (img_hsv.max()-img_hsv.min(), cv2.COLOR_HSV2BGR) 
+        # (img_hsv.max()-img_hsv.min(), cv2.COLOR_HSV2BGR)
         #読み込んだ画像をグレースケール形式に変換する
         self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)
         #最初のイメージの背景での上がどこにあるか検索している
@@ -155,76 +155,64 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         return img_bin, img_bin_ocr
 
     def __get_region_y_range(self):
-        """画像中のグラフより上の部分とグラフ部分それぞれのy軸From, Toを取得する
+        """画像中のグラフ部分とその上のヘッダー部分を引き分けて、引き分けの高さ（ピクセル）をリターンする。
 
         Returns:
             (list, list) -- ([グラフの一番上の横線y座標から、写真の一番上まで], [グラフ下の横線から、グラフの一番上の横線のy座標まで])
         """
 
-        def get_rep_points(point_):
-            """リストの中から連続の数字をグループ化している
-            例）[1,2,3,223,224,225,226,1111,1112]→[[1,3],[223,226],[1111,1112]]にしている
-            """
-            begin_idx, pre_idx, end_idx = point_[0], point_[-1], 0
-            rep_points = []
-            for idx in point_:
-                if (idx - pre_idx) <= 30:
-                    pre_idx = idx
-                    continue
-                end_idx = pre_idx
-                rep_points.append([begin_idx, end_idx])
-                begin_idx, pre_idx = idx, idx
-            else:
-                rep_points.append([begin_idx, idx])
-            return rep_points
-        
-        thin_horizontal_lines = self._get_thin_horizontal_lines(get_rep_points)
+        thin_horizontal_lines = self._get_thin_horizontal_lines(self.img_org_gray)
+        #一番上にある細く長い横線をtop_yに選択する
+        # この方法はOS(現在OS17)にきく:グラフの一番上の横線はページ中の一番上の細く長い横線と同じ
+        # __get_binary_imageのthresholdはあまい場合は、綺麗に横線を読み取れなくなる。
+        #  こうなると、thin_horizontal_linesにある最初の結果はグラフの一番上の横線に被らないおそれがあって、
+        #  後でエラー発生するか間違っている結果が出る可能性は高い。
         top_y = thin_horizontal_lines[0][1] if thin_horizontal_lines else 0
 
         if top_y < 21:
             raise ValueError('写真には横線が見つかりませんでした')
 
-        #棒グラフ下のy座標を見つける
-        orange_rep_points = self._get_orange_regions(get_rep_points)
-        # 一番大きいオレンジ範囲（その画像において一番高い棒グラフ）をグラフと認識している
-        # 画像内にグラフ以外のオレンジ色がある可能性に対応の仕方
-        # オレンジ棒グラフの最下部のy座標
+        # 棒グラフ下のy座標を見つける方法:一番大きいオレンジの範囲のすぐ下の座標を使う
+        #  一番大きい範囲を選択する理由は画像内にグラフ以外のオレンジ色がある可能性に対応するため
+
+        # オレンジの範囲を取得する
+        orange_rep_points = self._get_orange_regions(self.img_org)
+        # 一番高さがあるオレンジ範囲（棒グラフの範囲）を選択し、
+        #  その棒グラフの最下部のy座標を取得する
         _, bottom_y = max(orange_rep_points, key=lambda r: r[1] - r[0])
 
-        #平均歩数や期間の領域, グラフの領域
+        # グラフの一番上の横線とグラフの下の線を使って、画像を引き分けてリターンする。
+        # 右にある最大数値がグラフの範囲に入るように、引き分け位置は実際線から少しだけ上にずらす
+        #   この20の数字はただいくつの写真(pngとjpeg)を見て選択した
         return [0, top_y - 1], [top_y + 1 - 20, bottom_y + 10 - 1]
-    
-    def _get_thin_horizontal_lines(self, get_rep_points):
-        #行がどのくらい暗かったら線と認識するか（50％以上暗かったら線と認識）
-        #0.5の数字は写真によって調整する必要性が出てくるかもしれない（その場合0.5だと低い可能性）
-        #例えば、歩数がかなり多く棒グラフが上の線に触れるほど伸びていて黒ならば、0.5が低くなる→thresholdの数値を上げる
-        darkness_ratio_threshold = 0.5
-        
-        colors_per_row = self.img_org.shape[1]
-        def get_dark_lines(image):
-            """
-            Return: 黒がdarkness_ratio_thresholdより多い行のy座標
-            一番左から一番右に伸びる線を無視する(このせんは明らかにグラフの線ではない)
-            """
-            black_pixels_per_line = get_black_pixels_per_line(image)
-            return [r_index for r_index, pixel_count in enumerate(black_pixels_per_line) if darkness_ratio_threshold <= pixel_count / colors_per_row]
 
-        #デバックしやすいようにイメージを保存する
-        self.debug_image_lines, _ = self.__get_binary_image(self.img_org_gray)
-        #変数に入っている情報は「横線のy座標」
-        horizontal_line_y_coordinates = get_dark_lines(self.debug_image_lines)
+    def _get_thin_horizontal_lines(self, img_gray):
+        """写真から縦幅が細く、横に長い線の位置（即ちピクセル高さ;y座標)をりーたんする
+        """
+
+        #デバックしやすいようにイメージをselfに保存
+        self.debug_image_lines, _ = self.__get_binary_image(img_gray)
+
+        #横長い線（のy座標）を取得
+        #横が長い行の認識方法: 一行にある黒いピクセルは50%を超えたら→横長いと認識
+        #  注意: この0.5の数字は写真によって調整する必要性が出てくるかもしれない（その場合0.5だと低い可能性がある）
+        #  例えば、歩数がかなり多く棒グラフが上の線に触れるほど伸びてたら、0.5のthresholdを超える可能性がある。この場合には、数値を上げるだけ
+        horizontal_line_y_coordinates = _get_lines_darker_than(self.debug_image_lines,
+                                                               darkness_ratio_threshold=0.5,
+                                                               colors_per_row=self.img_org.shape[1])
         
-        #横の連続線を箱みたいに範囲をグループ化する
-        rep_points = get_rep_points(horizontal_line_y_coordinates)
+        #連続な横線をグループ化([1, 2, 115, 117, 200]→[[1, 2], [115, 117], [200]]
+        rep_points = _get_repeated_points(horizontal_line_y_coordinates)
+        #なんとなく細い感じがする横線グループを残す
         thin_horizontal_lines = list(filter(lambda x: x[1] - x[0] < 5, rep_points))
 
         return thin_horizontal_lines
 
-    def _get_orange_regions(self, get_rep_points):
+    def _get_orange_regions(self, img_org):
         #オレンジの色を判別している
-        self.img_orange = orange_other_binarization(self.img_org)
+        self.img_orange, bin_black = orange_other_binarization(img_org)
         #オレンジ色がある範囲をグループ化している
-        orange_rep_points = get_rep_points(np.where(self.img_orange == self.BIN_BLACK)[0])
+        orange_rep_points = _get_repeated_points(bin_black[0])
         return orange_rep_points
 
     def __graph_info(self):
@@ -238,23 +226,14 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             )
         """
 
-        #グラフの底辺部分を探す
-        bin_ = orange_other_binarization(self.img_graph)
-        bin_black = np.where(bin_ == self.BIN_BLACK)
+        #バイナリ化:オレンジ→黒、他→しろ
+        binary_img_graph, binary_black = orange_other_binarization(self.img_graph)
 
-        #グラフの一番下にある黒い色を探してる
-        #棒が短すぎると、オレンジ色が下の線とぶつけ合う
-        #なので、max(bin_black[0])はバグってしまう（OSが新しくなったからではなく、もともとかも？）
-
-        #行ごとにオレンジ色なピクセルカウント
-        frequent_black = sorted(zip(*np.unique(bin_black[0], return_counts=True)), key=lambda c:(c[1],c[0]), reverse=True)
-        #オレンジの量上位10%多い行の中での一番下の行
-        bottom_y,_ = max(frequent_black[:len(frequent_black)//10], key=lambda x: x[0])
-        #bottom_y行のオレンジピクセルのｘ座標
-        bottom = np.where(bin_[bottom_y, :] == self.BIN_BLACK)[0]
+        #グラフの下の行のy座標を取得
+        bottom_y = _get_lowest_graph_row(binary_black)
 
         graph_x_range = self._get_graph_x_range()
-        bar_x_ranges = self._get_bar_x_ranges(bottom, bottom_y, bin_black)
+        bar_x_ranges = self._get_bar_x_ranges(binary_img_graph, bottom_y, binary_black)
 
         top_y = self._get_graph_top_y(bar_x_ranges)
         graph_y_range = [top_y, bottom_y]
@@ -269,6 +248,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         dark_pixel = get_black_pixels_per_line(self.img_bin_graph.transpose()[:right_edge])
 
         # フォントサイズが大きい場合、グラフが短くなり、数字の黒味が30%までなる可能性がある
+        # それと逆、縦の線は点線の場合、60％にも行けない可能性もある。
         darkness_threshold = 0.40
         dark_lines = [r_index for r_index, pixel_count in enumerate(dark_pixel) if pixel_count / self.img_bin_graph.shape[0] >= darkness_threshold]
 
@@ -277,14 +257,19 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         #グラフの幅：一番左縦のｘ座標から一番右縦のｘ座標までを探している
         return graph_x_range
 
-    def _get_bar_x_ranges(self, bottom, bottom_y, bin_black):
+    def _get_bar_x_ranges(self, binary_img_graph, bottom_y, bin_black):
         """棒の高さを取得する
         """
-        def height(begin_idx, end_idx):
+        def get_bar_height(begin_idx, end_idx):
             center = begin_idx + int((end_idx - begin_idx) / 2)
             return bottom_y - min(bin_black[0][bin_black[1]==center]) + 1
-        
-        #各棒のX軸範囲と高さ
+
+        # bottom_y行のオレンジピクセルのｘ座標
+        bottom = np.where(binary_img_graph[bottom_y, :] == self.BIN_BLACK)[0]
+        #解説:左から右をループして、ちょうど棒を通ったら、その棒の高さを計算して、bar_x_rangesに入れてく
+        #   具体的に、begin_idは棒の最も左な位置を示して、次の棒に飛ばす時（連続さが切られる）
+        #   pre_idxは棒の最も右な位置を示している。高さの計算はbegin_idxとpre_idxの間をとって、
+        #   その棒の最も高い点とbottom_yを比べてbar_x_rangesに入れる
         begin_idx, pre_idx, end_idx = bottom[0], bottom[-1], 0
         bar_x_ranges = []
         for idx in bottom:
@@ -292,10 +277,10 @@ class StepsImage():#Attributes:→クラス内で定義された変数
                 pre_idx = idx
                 continue
             end_idx = pre_idx
-            bar_x_ranges.append([begin_idx, end_idx, height(begin_idx, end_idx)])
+            bar_x_ranges.append([begin_idx, end_idx, get_bar_height(begin_idx, end_idx)])
             begin_idx, pre_idx = idx, idx
         else:
-            bar_x_ranges.append([begin_idx, idx, height(begin_idx, idx)])
+            bar_x_ranges.append([begin_idx, idx, get_bar_height(begin_idx, idx)])
 
         return bar_x_ranges
 
@@ -310,7 +295,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             non_bar_center = bar_x_ranges[bar_num][1] + int((bar_x_ranges[bar_num + 1][0] - bar_x_ranges[bar_num][1])/2)
             # 棒の間にある黒のピクセル(グラフの横線のみのはず)
             return np.where(self.img_bin_graph[:, non_bar_center] == self.BIN_BLACK)[0]
-        
+
         center_space_black = get_black_pixels_after_bar(bar_num=0)
         #点線がない場合は, 黒ドットは多くて30個程度だが, 点線がある場合は黒ドットは200個近く現れる
         #かなり少なめに見積もって100個を判定基準とする
@@ -328,6 +313,49 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             f'filepath : {self.filepath}',
         ]
         return str(info)
+
+
+def _get_lowest_graph_row(binary_black):
+    # グラフの一番下にある黒い色を探してるが、
+    #  棒が短すぎると、オレンジ色が下の線とぶつけ合う可能性があって、
+    #  max(binary_black[0])はバグってしまう (下しすぎになってしまう)
+    # これを対応するため、なるべく黒が多い行の中からmaxを取る。
+    #  こうすると、実際棒がある行からmaxを選択する
+    # 行ごとにオレンジ色なピクセルカウント
+    frequent_black = sorted(zip(*np.unique(binary_black[0], return_counts=True)), key=lambda c: (c[1], c[0]),
+                            reverse=True)
+    # オレンジの量上位10%多い行の中での一番下の行
+    bottom_y, _ = max(frequent_black[:len(frequent_black) // 10], key=lambda x: x[0])
+    return bottom_y
+
+
+def _get_lines_darker_than(image, darkness_ratio_threshold, colors_per_row):
+    """
+    Return: 黒がdarkness_ratio_thresholdより多い行のy座標
+    """
+    black_pixels_per_line = get_black_pixels_per_line(image)
+    return [r_index for r_index, pixel_count in enumerate(black_pixels_per_line) if darkness_ratio_threshold <= pixel_count / colors_per_row]
+
+
+def _get_repeated_points(point_):
+    """point_リストの中から連続の数字をグループ化している。
+    連続さは30ピクセルごとに分けている
+
+    例）[1,2,3,15,16,61,223,224,225,226,1111,1112]→[[1,16],[61],[223,226],[1111,1112]]にしている
+    """
+    begin_idx, pre_idx, end_idx = point_[0], point_[-1], 0
+    rep_points = []
+    for idx in point_:
+        if (idx - pre_idx) <= 30:
+            pre_idx = idx
+            continue
+        end_idx = pre_idx
+        rep_points.append([begin_idx, end_idx])
+        begin_idx, pre_idx = idx, idx
+    else:
+        rep_points.append([begin_idx, idx])
+    return rep_points
+
 
 def get_period_y_region(img_top):
     """期間のy軸From, Toを取得する
@@ -387,7 +415,10 @@ def orange_other_binarization(img):
 
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     #オレンジ系の色（Hが0～60度）、これらの数値は結果がうまくいくようにチューニングする
-    return np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 100) & (img_hsv[:,:,2] > 100), 0, 255)
+    binary_img = np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 100) & (img_hsv[:,:,2] > 100), 0, 255)
+    binary_black = np.where(binary_img == StepsImage.BIN_BLACK)
+    return binary_img, binary_black
+
 
 def get_black_pixels_per_line(image):
     """画像内に黒ピクセルが何個あるかを行ずつで数えている"""
@@ -457,7 +488,7 @@ def extract_details(image: StepsImage):
         if image.is_dark_mode:
             o = cv2.bitwise_not(o)
         return o
-    
+
     period_img, period_text = _get_period_img_and_text(image, binarize_otsu)
     label_img, label_text = _get_label_img_and_text(image, binarize_otsu)
     heights = _spread_bar_heights_across_date_range(image)
@@ -495,7 +526,7 @@ def _get_label_img_and_text(image, binarize_otsu):
 
 
 def _spread_bar_heights_across_date_range(image):
-    
+
     #heightが31個になるように棒のない箇所の高さをゼロとして補完する
     bar_width = image.bar_x_ranges[0][1] - image.bar_x_ranges[0][0] + 1
     graph_width = image.graph_x_range[1] - image.graph_x_range[0] - 1
