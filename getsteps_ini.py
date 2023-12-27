@@ -9,6 +9,7 @@ import argparse
 import traceback
 import openpyxl
 import itertools
+import asyncio
 
 import numpy as np
 import cv2
@@ -18,9 +19,9 @@ from PIL import Image
 plt.gray()
 # %%
 #OCRで使うソフトウェアを設定
-#tesseract win binary(64bit)を導入した
+#tesseract win binary(64bit)を導入
 #pyocrに対応したOCRソフトとしてtesseractだけがインストールされていることを想定する
-#pyocrにTesseractを指定する。
+#pyocrにTesseractを指定する
 pyocr.tesseract.TESSERACT_CMD = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
 TOOLS = pyocr.get_available_tools()
 TOOL = TOOLS[0]
@@ -46,7 +47,7 @@ _IMG_ERROR_DIR = config['PATH']['Img_error_dir']
 _IMG_OLDLAYOUT_DIR = config['PATH']['Img_oldlayout_dir']
 # %%
 
-class StepsImage():#Attributes:→クラス内で定義された変数のこと
+class StepsImage():#Attributes:→クラス内で定義された変数
     """歩数の画像クラス
 
     Attributes:
@@ -65,16 +66,15 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
 
     BIN_BLACK = 0
     BIN_WHITE = 255
-    #グラフにつき31個のbinがある（1日～31日？）
+    #グラフにつき31個のbinがある
     BIN_NUMBER = 31
 
-    def __init__(self, filepath):#インスタンス化メソッド#第一引数は自インスタンス(self)
+    def __init__(self, filepath):
         """コンストラクタ
 
         Arguments:
             filepath (str): ファイルパス
         """
-
         #何度も呼び出し、さほどデータサイズも大きくないデータはクラス変数とする
         self.filepath = filepath
         #self.filename = os.path.basename(self.filepath)
@@ -90,7 +90,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
         self.top_region, self.graph_region = self.__get_region_y_range()
         self.img_top = self.img_org[self.top_region[0]:self.top_region[1], :]
         self.img_graph = self.img_org[self.graph_region[0]:self.graph_region[1], :]
-        #OCRの精度を上げるためグラフ解析用とOCR用のイメージは別の条件でバイナリイメージを作る
+        #OCRの精度を上げるためグラフ解析用とOCR用のイメージは別の条件で2値化イメージを作る
         self.img_bin_top, self.img_bin_top_ocr = self.__get_binary_image(
             self.img_org_gray[self.top_region[0]:self.top_region[1], :]
         )
@@ -106,9 +106,8 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
             bool: True 旧レイアウト, False 新レイアウト
         """
 
-        #BGRーHSV色空間の変換：色相(H),彩度(S),明度(V)
         #ピンク系の色が存在している場合、旧レイアウトとみなす
-        img_hsv = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2HSV)#BGRーHSV色空間の変換：色相(H),彩度(S),明度(V)
         img_pink = np.where((img_hsv[:,:,0] > 120) & (img_hsv[:,:,1] > 160) & (img_hsv[:,:,2] > 220) , 0, 255)
         cnt = np.count_nonzero(img_pink == 0)
         if cnt > 500:
@@ -138,18 +137,11 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
             numpy.array -- OCR用の白黒2値データ
         """
 
-        th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (0, 255, cv2.THRESH_BINARY_INV)
+        th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (2, 255, cv2.THRESH_BINARY_INV)
         th_min_ocr, th_max_ocr, bin_mode_ocr = (230, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (35, 255, cv2.THRESH_BINARY_INV)
 
         _, img_bin = cv2.threshold(img, th_min, th_max, bin_mode)
         _, img_bin_ocr = cv2.threshold(img, th_min_ocr, th_max_ocr, bin_mode_ocr)
-
-        #２値化の結果黒が多い場合（Thresholdの条件が厳しい場合）は大津の２値化をベースにThresholdを決める
-        mode, _ = stats.mode(np.ravel(img_bin))
-        if mode == 0:
-            th, _ = cv2.threshold(img, 0, 255, cv2.THRESH_OTSU)
-            _, img_bin = cv2.threshold(img, min(254, th+60), 255, bin_mode)
-            _, img_bin_ocr = cv2.threshold(img, th, 255, bin_mode_ocr)
 
         return img_bin, img_bin_ocr
 
@@ -157,56 +149,37 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
         """画像中のグラフより上の部分とグラフ部分それぞれのy軸From, Toを取得する
 
         Returns:
-            (list, list) -- ([グラフより上の部分のy軸From, To], [グラフ部分のy軸From, To])
+            (list, list) -- ([グラフの一番上の横線y座標から、写真の一番上まで], [グラフ下の横線から、グラフの一番上の横線のy座標まで])
         """
 
-        #どこからスタートしているかの縦の線（どこから色を探しているか）
-        center = self.img_org.shape[1]//2
-        self.right_edge_ver_line = self.img_org[:, center-10:center+10]
-
-        cv2.imwrite('img_org.png', self.img_org)
-
-        #画像のほとんどが黒い場合は２値化の条件を緩める
-        if stats.mode(self.right_edge_ver_line) == 0:
-            th_min, th_max, bin_mode = (250, 255, cv2.THRESH_BINARY) if not self.is_dark_mode else (20, 255, cv2.THRESH_BINARY_INV)
-            _, img_bin = cv2.threshold(self.img_org_gray, th_min, th_max, bin_mode)
-
-        #黒線（１ピクセル）が入っている１番目～２番目の位置
-        #7,11→2,7に変更した@11/20
-        #top_index, bottom_index = (2, 7) if not self.is_dark_mode else (3, -2)
-        #top_index, bottom_index = 7, 11
-        #light_lines = np.where((right_edge_ver_line == [242, 241, 241]) |
-                    #(right_edge_ver_line == [246, 242, 242]))[0]
-        #白ではないけど白っぽい
-
-        def get_black_pixels_per_line(image):
-            non_255_values = np.where(image < 255)
-            color_values_by_pixel = itertools.groupby(zip(*non_255_values), lambda x: (x[0], x[1]))
-            black_pixels =  [(row, col) for (row, col), group in color_values_by_pixel if len(list(group)) == 3]
-            black_pixels_per_line = [(row, len(list(group))) for row, group in itertools.groupby(black_pixels, lambda x: x[0])]
-            return black_pixels_per_line
+        #行がどのくらい暗かったら線と認識するか（50％以上暗かったら線と認識）
+        #0.5の数字は写真によって調整する必要性が出てくるかもしれない（その場合0.5だと低い可能性）
+        #例えば、歩数がかなり多く棒グラフが上の線に触れるほど伸びていて黒ならば、0.5が低くなる→thresholdの数値を上げる
+        darkness_ratio_threshold = 0.5
         
-        colors_per_row = self.right_edge_ver_line.shape[1]
+        colors_per_row = self.img_org.shape[1]
         def get_dark_lines(image):
+            """
+            Return: 黒がdarkness_ratio_thresholdより多い行のy座標
+            一番左から一番右に伸びる線を無視する(このせんは明らかにグラフの線ではない)
+            """
             black_pixels_per_line = get_black_pixels_per_line(image)
-            return [r_index for r_index, pixel_count in black_pixels_per_line if pixel_count / colors_per_row >= 0.5]
+            return [r_index for r_index, pixel_count in enumerate(black_pixels_per_line) if darkness_ratio_threshold <= pixel_count / colors_per_row]
+
+        #デバックしやすいようにイメージを保存する
+        self.debug_image_lines, _ = self.__get_binary_image(self.img_org_gray)
+        cv2.imwrite('debug_img.jpg', self.debug_image_lines)
+        #変数に入っている情報は「横線のy座標」
+        horizontal_line_y_coordinates = get_dark_lines(self.debug_image_lines)
         
-        self.light_image =  np.where((self.right_edge_ver_line < self.BIN_WHITE) &
-                    (self.right_edge_ver_line > 225) &
-                    (self.right_edge_ver_line < 250), 0, 255)
-        light_image_lines = get_dark_lines(self.light_image)
-
-        self.dark_image = np.where((self.right_edge_ver_line > self.BIN_BLACK) &
-                    (self.right_edge_ver_line < 30) &
-                    (self.right_edge_ver_line > 5), 0, 255)
-        dark_image_lines = get_dark_lines(self.dark_image)
-
         def get_rep_points(point_):
-            #境界線のピクセルが連続する場合を考慮した上で分割する
+            """リストの中から連続の数字をグループ化している
+            例）[1,2,3,223,224,225,226,1111,1112]→[[1,3],[223,226],[1111,1112]]にしている
+            """
             begin_idx, pre_idx, end_idx = point_[0], point_[-1], 0
             rep_points = []
             for idx in point_:
-                if (idx - pre_idx) <= 1:
+                if (idx - pre_idx) <= 30:
                     pre_idx = idx
                     continue
                 end_idx = pre_idx
@@ -214,20 +187,27 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
                 begin_idx, pre_idx = idx, idx
             else:
                 rep_points.append([begin_idx, idx])
-            #重要:10を引いてる意味：右の数字を探そうとしてる
-            #他の画像で上手くいかなかったらここをいじる（例：-10⇒-20とか）
-            #携帯の高さによって変わるかもしれない？
             return rep_points
-        
-        rep_points = get_rep_points(light_image_lines if not self.is_dark_mode else dark_image_lines)
+        #横の連続線を箱みたいに範囲をグループ化する
+        rep_points = get_rep_points(horizontal_line_y_coordinates)
+        # print(horizontal_line_y_coordinates)
+        # print(rep_points)
+        thin_horizontal_lines = list(filter(lambda x: x[1] - x[0] < 5, rep_points))
+        top_y = thin_horizontal_lines[0][1] if thin_horizontal_lines else 0
+
+        #棒グラフ下のy座標を見つける
+        #オレンジの色を判別している
         self.img_orange = orange_other_binarization(self.img_org)
+        #オレンジ色がある範囲をグループ化している
         orange_rep_points = get_rep_points(np.where(self.img_orange == self.BIN_BLACK)[0])
+        #一番大きいオレンジ範囲（その画像において一番高い棒グラフ）をグラフと認識している
+        # 画像内にグラフ以外のオレンジ色がある可能性に対応の仕方
         max_range = max(rep[1] - rep[0] for rep in orange_rep_points)
-        top_y_orange, bottom_y = [rep for rep in orange_rep_points if rep[1] - rep[0] == max_range][0]
-        top_y = max(rep[1] for rep in rep_points if rep[1] < top_y_orange + 5)
+        #オレンジ棒グラフの最下部のy座標
+        _, bottom_y = [rep for rep in orange_rep_points if rep[1] - rep[0] == max_range][0]
 
         #平均歩数や期間の領域, グラフの領域
-        return [0, top_y - 1], [top_y + 1 - 20, bottom_y + 10 - 1]
+        return [0, top_y - 1], [max(top_y + 1 - 20, 20), bottom_y + 10 - 1]
 
     def __graph_info(self):
         """棒グラフ部分の情報を取得する
@@ -238,28 +218,55 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
             list,: [グラフ領域のx軸From, To]
             list,: [グラフ領域のy軸From, To]
             )
-
-        ToDo:
-            短くする
-            やっていることが多すぎる
         """
 
-        #グラフの底辺部分
+        #グラフの底辺部分を探す
         bin_ = orange_other_binarization(self.img_graph)
         bin_black = np.where(bin_ == self.BIN_BLACK)
+
         #グラフの一番下にある黒い色を探してる
-        #オレンジが一番多い行の中で一番下の行
         #棒が短すぎると、オレンジ色が下の線とぶつけ合う
         #なので、max(bin_black[0])はバグってしまう（OSが新しくなったからではなく、もともとかも？）
+
+        #行ごとにオレンジ色なピクセルカウント
         frequent_black = sorted(zip(*np.unique(bin_black[0], return_counts=True)), key=lambda c:(c[1],c[0]), reverse=True)
+        #オレンジの量上位10%多い行の中での一番下の行
         bottom_y,_ = max(frequent_black[:len(frequent_black)//10], key=lambda x: x[0])
+        #bottom_y行のオレンジピクセルのｘ座標
         bottom = np.where(bin_[bottom_y, :] == self.BIN_BLACK)[0]
 
-        #棒の高さを取得する
-        def height(begin_idx, end_idx):
-            center = begin_idx + int((end_idx -begin_idx)/2)
-            return bottom_y - min(bin_black[0][bin_black[1]==center]) + 1
+        graph_x_range = self.__get_graph_x_range()
+        bar_x_ranges = self.__get_bar_x_ranges(bottom, bottom_y, bin_black)
 
+        top_y = self.__get_graph_top_y(bar_x_ranges)
+        graph_y_range = [top_y, bottom_y]
+
+        return bar_x_ranges, graph_x_range, graph_y_range
+
+    def __get_graph_x_range(self):
+        """グラフ領域のx軸範囲
+        """
+        # スクロールバーを無視するために、右の5%を切り落とす
+        right_edge = (self.img_bin_graph.shape[1] * 95) // 100
+        dark_pixel = get_black_pixels_per_line(self.img_bin_graph.transpose()[:right_edge])
+    
+
+        # フォントサイズが大きい場合、グラフが短くなり、数字の黒味が30%までなる可能性がある
+        darkness_threshold = 0.40
+        dark_lines = [r_index for r_index, pixel_count in enumerate(dark_pixel) if pixel_count / self.img_bin_graph.shape[0] >= darkness_threshold]
+
+        #縦の線が黒ピクセル25％以上だったら線と認識している
+        graph_x_range = [min(dark_lines), max(dark_lines)]
+        #グラフの幅：一番左縦のｘ座標から一番右縦のｘ座標までを探している
+        return graph_x_range
+
+    def __get_bar_x_ranges(self, bottom, bottom_y, bin_black):
+        """棒の高さを取得する
+        """
+        def height(begin_idx, end_idx):
+            center = begin_idx + int((end_idx - begin_idx) / 2)
+            return bottom_y - min(bin_black[0][bin_black[1]==center]) + 1
+        
         #各棒のX軸範囲と高さ
         begin_idx, pre_idx, end_idx = bottom[0], bottom[-1], 0
         bar_x_ranges = []
@@ -273,31 +280,31 @@ class StepsImage():#Attributes:→クラス内で定義された変数のこと
         else:
             bar_x_ranges.append([begin_idx, idx, height(begin_idx, idx)])
 
-        #グラフ領域のx軸範囲
-        graph_bottom = np.where(self.img_bin_graph[bottom_y-2:bottom_y+2, :].transpose() == self.BIN_BLACK)[0]
-        #
-        pre_idx = graph_bottom[0]
-        for idx in graph_bottom:
-            if 5 < (idx - pre_idx):
-                graph_x_range = [graph_bottom[0], pre_idx]
-                break
-            pre_idx = idx
-        else:
-            graph_x_range = [graph_bottom[0], pre_idx]
-        #グラフ領域のy軸範囲
-        non_bar_center = bar_x_ranges[0][1] + int((bar_x_ranges[1][0] - bar_x_ranges[0][1])/2)
-        center_space_black = np.where(self.img_bin_graph[:, non_bar_center] == self.BIN_BLACK)[0]
-        #棒と棒の中心に縦点線が当たる場合がある. その場合は一つ右隣の棒と棒の中心を使う
-        #点線がない場合は, 黒ドットは高々30個程度だが, 点線がある場合は黒ドットは200個近く現れる
+        return bar_x_ranges
+
+    def __get_graph_top_y(self, bar_x_ranges):
+        """グラフ領域のy軸範囲
+        """
+        def get_black_pixels_after_bar(bar_num):
+            """
+            Return: 指定された棒と右隣の棒の間にある黒ピクセル
+            """
+            # 最初の棒とその次の棒と間
+            non_bar_center = bar_x_ranges[bar_num][1] + int((bar_x_ranges[bar_num + 1][0] - bar_x_ranges[bar_num][1])/2)
+            # 棒の間にある黒のピクセル(グラフの横線のみのはず)
+            return np.where(self.img_bin_graph[:, non_bar_center] == self.BIN_BLACK)[0]
+        
+        center_space_black = get_black_pixels_after_bar(bar_num=0)
+        #点線がない場合は, 黒ドットは多くて30個程度だが, 点線がある場合は黒ドットは200個近く現れる
         #かなり少なめに見積もって100個を判定基準とする
+        #通称:点線があった場合は多分黒びくセルの量は100より多い
+        #棒と棒の中心に縦点線が当たる場合、一つ右隣の棒と棒の中心を使う
         if 100 < len(center_space_black):
-            non_bar_center = bar_x_ranges[1][1] + int((bar_x_ranges[2][0] - bar_x_ranges[1][1])/2)
-            center_space_black = np.where(self.img_bin_graph[:, non_bar_center] == self.BIN_BLACK)[0]
+            center_space_black = get_black_pixels_after_bar(bar_num=1)
+
         top_y = min(center_space_black)
+        return top_y
 
-        graph_y_range = [top_y, bottom_y]
-
-        return bar_x_ranges, graph_x_range, graph_y_range
 
     def __repr__(self):
         info = [
@@ -327,6 +334,7 @@ def get_period_y_region(img_top):
             return idx - 1, img_top.shape[0] - 1
         pre_idx = idx
 
+
 def get_label_y_region(img_graph, start_x, end_x):
     """棒グラフの一番上の補助線のラベルのy軸From, Toを取得する
 
@@ -339,11 +347,6 @@ def get_label_y_region(img_graph, start_x, end_x):
     """
     #走査する部分を切り出した画像中の黒ドット部分の座標
     search_img = img_graph[:, start_x+2:end_x]
-    #0424次回この上から修正をするstart_xの計算式を見る
-    #import random
-    #name=str(random.randint(0,10000000))+".png"
-    #cv2.imwrite(name,search_img)
-    #print(name)
     black = np.unique(np.where(search_img == StepsImage.BIN_BLACK)[0])
 
     #画像最上部から下方向に走査する
@@ -353,7 +356,7 @@ def get_label_y_region(img_graph, start_x, end_x):
             #多少バッファを見る
             return 0, pre_idx + 7
         pre_idx = idx
-    raise ValueError("グラフのy範囲を見つけられなかった")
+    return 0, pre_idx
 
 def orange_other_binarization(img):
     """画像中のオレンジ系の箇所を黒, その他を白とする白黒2値に変換する
@@ -367,11 +370,16 @@ def orange_other_binarization(img):
 
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     #オレンジ系の色（Hが0～60度）、これらの数値は結果がうまくいくようにチューニングする
-    return np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 10) & (img_hsv[:,:,2] > 60), 0, 255)
+    return np.where((img_hsv[:,:,0] < 20) & (img_hsv[:,:,1] > 100) & (img_hsv[:,:,2] > 100), 0, 255)
+
+def get_black_pixels_per_line(image):
+    """画像内に黒ピクセルが何個あるかを行ずつで数えている"""
+    color_counts_per_line = [dict(zip(*np.unique(line, return_counts=True))) for line in image]
+    return [counts.get(StepsImage.BIN_BLACK, 0) for counts in color_counts_per_line]
 
 def write_csv(path, header, data, encoding='utf8'):
     """CSV出力する
-
+ 
     Args:
         path (str): CSVファイルパス
         header (numpy.array): ヘッダー
@@ -407,7 +415,7 @@ def initialize_dir(path):
     except IOError:
         print(f'[error]{path} is opened.')
 
-def main(image: StepsImage):
+def extract_details(image: StepsImage):
     """メイン処理
 
     Arguments:
@@ -447,7 +455,7 @@ def main(image: StepsImage):
     # グラフ右の線（点線）から写真の右いっぱいではなくその左の半分くらいまでのregion area（閾値）の中で、ラベルの上下を探す
     label_top, label_bottom = get_label_y_region(image.img_bin_graph_ocr, image.graph_x_range[1], (image.graph_x_range[1] + image.img_bin_graph_ocr.shape[1]) // 2)
     #label_img = image.img_bin_graph_ocr[label_top:label_bottom, graph_x_range[1]+1:]
-    label_img = binarize_otsu(image.img_graph[label_top:label_bottom, image.graph_x_range[1]+1 - 50:])
+    label_img = binarize_otsu(image.img_graph[label_top:label_bottom, image.graph_x_range[1]+1 :])
     label_text = TOOL.image_to_string(Image.fromarray(label_img),
                                       lang='eng',
                                       builder=pyocr.builders.DigitBuilder(tesseract_layout=7))
@@ -460,7 +468,7 @@ def main(image: StepsImage):
     space_width = graph_width- bar_width*StepsImage.BIN_NUMBER
     space_unit = int(space_width/StepsImage.BIN_NUMBER)
     edge_space = int(space_width/StepsImage.BIN_NUMBER/2)
-    b_s_width = bar_width + space_unit
+    b_s_width = bar_width + space_unit + 1
     j, heights = 0, np.zeros(StepsImage.BIN_NUMBER)
     for idx, bar in enumerate(image.bar_x_ranges):
         if idx == 0:
@@ -470,6 +478,7 @@ def main(image: StepsImage):
             s = bar[0] - image.bar_x_ranges[idx-1][1] - 1
             n = int((s - space_unit)/b_s_width)
         j += n
+        if (j >= len(heights)): break
         heights[j] = bar[2]
         j += 1
 
@@ -487,31 +496,115 @@ def main(image: StepsImage):
 
     return period_img, period_text, label_img, label_text, max_height_pixel, heights
 
-if __name__== '__main__':
+
+def extract_image_details(index, file_, files, write_xl_args, error_results, error_header):
+    filename = os.path.basename(file_)
+    image = None
+    try:
+        if not os.path.exists(file_):
+            raise FileNotFoundError(file_)
+
+        print(f'---{index+1}/{len(files)}---')
+        print(filename)
+
+        image = StepsImage(file_)
+
+        if image.is_old_layout:
+            raise AttributeError('Old layout.')
+        img_period, period, img_label, label, max_height_pixel, heights = extract_details(image)
+        #OCRした部分の画像を出力
+        img_period_path = _IMG_PERIOD_DIR + '/' + filename
+        img_label_path = _IMG_LABEL_DIR + '/' + filename
+        cv2.imwrite(img_period_path, img_period)
+        cv2.imwrite(img_label_path, img_label)
+
+        write_xl_args[index] = [img_period_path, img_period, img_label_path, img_label,
+                                filename, period, label, max_height_pixel, heights, file_, index]
+
+    except FileNotFoundError as fnfe:
+        error_results[index] = dict(zip(error_header, [filename, 'FileNotFoundError', '']))
+        shutil.copy(file_, _IMG_ERROR_DIR)
+
+    except Exception as e:
+        _, _, tb=sys.exc_info()
+        lineno=""
+        while tb is not None:
+            lineno +=str(tb.tb_lineno)+","
+            tb=tb.tb_next
+        error_results[index] = dict(zip(error_header, [filename, type(e), e.args[0] if e.args else " ", lineno]))
+        if image is None:
+            shutil.copy(file_, _IMG_ERROR_DIR)
+            return
+
+        if image.is_old_layout:
+            shutil.copy(file_, _IMG_OLDLAYOUT_DIR)
+            return
+        shutil.copy(file_, _IMG_ERROR_DIR)
+
+def write_xl_row(img_period_path, img_period, img_label_path, img_label,
+                 filename, period, label, max_height_pixel, heights, file_, index,
+                 ni, results_map, header, max_width_period, max_width_label, ws, wb):
+    print(f'---Writing {file_}---')
+
+    #Excelに出力
+    img_period_r = openpyxl.drawing.image.Image(img_period_path)
+    img_label_r = openpyxl.drawing.image.Image(img_label_path)
+
+    #出力先のセルアドレスを取得
+    now_row = ni + 1 #header行を飛ばす
+    addr_period = ws.cell(row=now_row, column=1).coordinate
+    addr_label = ws.cell(row=now_row, column=2).coordinate
+
+    #セル幅調整
+    h = max(img_period.shape[0], img_label.shape[0])
+    ws.row_dimensions[now_row].height = h*0.75
+    if max_width_period < img_period.shape[1]:
+        max_width_period = img_period.shape[1]
+    if max_width_label < img_label.shape[1]:
+        max_width_label = img_label.shape[1]
+
+    #画像のアンカ設定
+    img_period_r.anchor = addr_period
+    img_label_r.anchor = addr_label
+
+    #画像出力
+    ws.add_image(img_period_r)
+    ws.add_image(img_label_r)
+
+    #棒グラフの高さを推測
+    heights_xlsf = [f'=E{now_row}/F{now_row}*{i[1]}' for i in enumerate(heights)]
+    #record =  [image.filename, period, label, max_height_pixel] + heights.tolist()
+    record =  [filename, period, label, max_height_pixel] + heights_xlsf
+
+    #文字データのExcelへの埋め込み
+    for i, h in enumerate(record):
+        c = ws.cell(row=now_row, column=3+i)
+        c.value = h
+
+    #CSV出力用データ
+    results_map.append(dict(zip(header, record)))
+    shutil.copy(file_, _IMG_SUCCESS_DIR)
+
+    #Excel Save 100件に1回
+    if (index + 1) % 100 == 0:
+        wb.save(_OUTPUT_EXCEL_PATH)
+
+    return max_width_label, max_width_period
+
+def main():
     start_time = time.time()
 
     #処理対象ファイルリスト
     types = ('/*.png', '/*.jpg', '/*.jpeg')
-    #types = ('/*.jpg', '/*.jpeg')
     files = []
     for type_ in types:
         files.extend(glob.glob(_DATA_DIR_PATH + type_))
-
-    base_files = ['0016530669_0013_001.jpg', '0016530671_0001_001.jpg', '0016530678_0001_001.jpg',
-'0016530686_0013_001.jpg', '0016530697_0001_001.jpg', '0016530729_0001_001.jpg',
-'0016530766_0001_001.jpg', '0016530776_0001_001.jpg', '0016530811_0001_001.jpg', 
-'0016530827_0013_001.jpg', '0016530830_0001_001.jpg', '0016530833_0013_001.jpg',
-'0016530840_0001_001.jpg', '0016530848_0013_001.jpg', '0016530868_0001_001.jpg',
-'0016530914_0001_001.jpg', '0016530927_0013_001.jpg', '0016530929_0001_001.jpg',]
-    
-    files = ['data_sample/Data_Kobe/' + base_file_name for base_file_name in base_files]
 
     #出力先フォルダの初期化
     for p in [_IMG_LABEL_DIR, _IMG_PERIOD_DIR, _IMG_SUCCESS_DIR, _IMG_ERROR_DIR, _IMG_OLDLAYOUT_DIR ]:
         initialize_dir(p)
 
     #CSVのヘッダ
-    #header = ['filename', 'period', 'max_height', 'height_per_pixel']
     header = ['period_img', 'max_height_img', 'filename', 'period', 'max_height', 'max_height_pixel']
     header.extend([str(i) for i in range(1, StepsImage.BIN_NUMBER + 1)])
     error_header = ['filename', 'exception_type', 'message', 'lineno']
@@ -532,97 +625,24 @@ if __name__== '__main__':
 
     #棒グラフを読み取る
     results = []
-    error_results = []
+    error_results_map = {}
     max_width_period, max_width_label = 0, 0
-    ni = 1
+    write_xl_args = {}
+    extract_image_details_args = []
     for index, file_ in enumerate(files):
-        filename = os.path.basename(file_)
-        try:
-            if not os.path.exists(file_):
-                raise FileNotFoundError()
+        extract_image_details_args.append([index, file_, files, write_xl_args, error_results_map, error_header])
 
-            print(f'---{index+1}/{len(files)}---')
-            print(filename)
+    for args in extract_image_details_args:
+        extract_image_details(*args)
+    # 同時実行(別にもっと早いでもない)
+    # loop = asyncio.get_event_loop()
+    # coroutines = [asyncio.to_thread(extract_image_details, *args) for args in extract_image_details_args]
+    # loop.run_until_complete(asyncio.gather(*coroutines))
 
-            image = None
-            image = StepsImage(file_)
+    for ni, (_, args) in enumerate(sorted(write_xl_args.items()), 1):
+        max_width_label, max_width_period = write_xl_row(*args, ni, results, header, max_width_period, max_width_label, ws, wb)
 
-            if image.is_old_layout:
-                raise AttributeError('Old layout.')
-            img_period, period, img_label, label, max_height_pixel, heights = main(image)
-            #OCRした部分の画像を出力
-            img_period_path = _IMG_PERIOD_DIR + '/' + filename
-            img_label_path = _IMG_LABEL_DIR + '/' + filename
-            cv2.imwrite(img_period_path, img_period)
-            cv2.imwrite(img_label_path, img_label)
-
-            #Excelに出力
-            img_period_r = openpyxl.drawing.image.Image(img_period_path)
-            img_label_r = openpyxl.drawing.image.Image(img_label_path)
-
-            #出力先のセルアドレスを取得
-            now_row = ni + 1 #header行を飛ばす
-            addr_period = ws.cell(row=now_row, column=1).coordinate
-            addr_label = ws.cell(row=now_row, column=2).coordinate
-
-            #セル幅調整
-            h = max(img_period.shape[0], img_label.shape[0])
-            ws.row_dimensions[now_row].height = h*0.75
-            if max_width_period < img_period.shape[1]:
-                max_width_period = img_period.shape[1]
-            if max_width_label < img_label.shape[1]:
-                max_width_label = img_label.shape[1]
-
-            #画像のアンカ設定
-            img_period_r.anchor = addr_period
-            img_label_r.anchor = addr_label
-
-            #画像出力
-            ws.add_image(img_period_r)
-            ws.add_image(img_label_r)
-
-            #棒グラフの高さを推測
-            heights_xlsf = [f'=E{now_row}/F{now_row}*{i[1]}' for i in enumerate(heights)]
-            #record =  [image.filename, period, label, max_height_pixel] + heights.tolist()
-            record =  [filename, period, label, max_height_pixel] + heights_xlsf
-
-            #文字データのExcelへの埋め込み
-            for i, h in enumerate(record):
-                c = ws.cell(row=now_row, column=3+i)
-                c.value = h
-
-            #CSV出力用データ
-            results.append(dict(zip(header, record)))
-            shutil.copy(file_, _IMG_SUCCESS_DIR)
-
-            #Excel Save 100件に1回
-            if (index + 1) % 100 == 0:
-                wb.save(_OUTPUT_EXCEL_PATH)
-
-            ni += 1
-
-        except FileNotFoundError as fnfe:
-            error_results.append(dict(zip(error_header, [filename, 'FileNotFoundError', ''])))
-            shutil.copy(file_, _IMG_ERROR_DIR)
-
-        except Exception as e:
-            exc_type, exc_obj, tb=sys.exc_info()
-            lineno=""
-            while tb is not None:
-                lineno +=str(tb.tb_lineno)+","
-                tb=tb.tb_next
-            error_results.append(dict(zip(error_header, [filename, type(e), e.args[0], lineno])))
-            if image is None:
-                shutil.copy(file_, _IMG_ERROR_DIR)
-                continue
-
-            if image.is_old_layout:
-                shutil.copy(file_, _IMG_OLDLAYOUT_DIR)
-                continue
-            shutil.copy(file_, _IMG_ERROR_DIR)
-
-    else:
-        wb.save(_OUTPUT_EXCEL_PATH)
+    wb.save(_OUTPUT_EXCEL_PATH)
 
     #Excelのグラフ貼り付け部分のサイズ変更
     wb = openpyxl.load_workbook(_OUTPUT_EXCEL_PATH)
@@ -635,6 +655,11 @@ if __name__== '__main__':
     encoding_ = 'utf8'
     #encoding_ = 'cp932'
     write_csv(_RESULT_CSV_PATH, header, results, encoding_)
+    error_results = [error_results_map[index] for index in sorted(error_results_map)]
     write_csv(_ERROR_CSV_PATH, error_header, error_results, encoding_)
 
     print(f'Elapsed time: {time.time() - start_time} second.')
+
+
+if __name__== '__main__':
+    main()
