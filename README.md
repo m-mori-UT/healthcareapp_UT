@@ -33,3 +33,8 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
      * venvを使っている方はrun.cmdのactivateコメントを省く
    * 実行結果は 'output' フォルダに出力される
   
+
+### Acknowledgements
+
+旧ツール:
+https://github.com/HMAdachi-THK/healthcareapp-stepsreader
