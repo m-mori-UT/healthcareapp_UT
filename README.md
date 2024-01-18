@@ -11,10 +11,7 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
 ### Requirement
 * Windows OS (64 bit) (Windows 10で動作確認済)
 * Python 3.6 (3.6.13で動作確認済)
-* Pythonパッケージ
-  ```shell
-  pip install -r requirements.txt
-  ```
+  * https://www.python.org/downloads/
 * Tesseract (64 bit) (v5.0.0-alpha.20200328で動作確認済)
   - OCRソフト
   - インストーラは https://github.com/UB-Mannheim/tesseract/wiki から入手可能
@@ -22,17 +19,17 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
 ### Usage
 
 1. Git Clone
-
    ```shell
-   git https://github.com/HMAdachi-THK/healthcareapp-stepsreader.git
+   git clone https://github.com/m-mori-UT/healthcareapp_UT.git
    ```
-
-2. データ準備
-
-  * 'data'フォルダに解析するヘルスケアアプリ画像を格納する
-  
-3. 実行
-
-  * run.cmdをダブルクリックする
-  * 実行結果は'output'フォルダに出力される
+2. Pythonパッケージ
+    ```shell
+    pip install -r requirements.txt
+    ```
+3. データ準備
+   * 'data' フォルダに解析するヘルスケアアプリ画像を格納する
+4. 実行
+   * run.cmdをダブルクリックする
+     * venvを使っている方はrun.cmdのactivateコメントを省く
+   * 実行結果は 'output' フォルダに出力される
   

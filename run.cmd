@@ -3,8 +3,8 @@ cd /d %~dp0
 
 set data_dir=config.ini
 
-rem set python_env_name=[env name]
-rem call activate %python_env_name%
+@REM venvを使いたい方は下のコメントを省く
+@REM call venv/Scripts/activate
 
 echo [START]%time:~0,8%
 echo Running...

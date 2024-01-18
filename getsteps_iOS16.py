@@ -1,4 +1,3 @@
-# %%
 import sys, os, time, csv, re, shutil
 import linecache
 import math
@@ -17,7 +16,7 @@ import pyocr, pyocr.builders
 import matplotlib.pyplot as plt
 from PIL import Image
 plt.gray()
-# %%
+
 #OCRで使うソフトウェアを設定
 #tesseract win binary(64bit)を導入
 #pyocrに対応したOCRソフトとしてtesseractだけがインストールされていることを想定する
@@ -25,8 +24,6 @@ plt.gray()
 pyocr.tesseract.TESSERACT_CMD = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
 TOOLS = pyocr.get_available_tools()
 TOOL = TOOLS[0]
-
-# %%
 
 #コマンドライン引数
 parser = argparse.ArgumentParser()
@@ -47,7 +44,7 @@ _IMG_ERROR_DIR = config['PATH']['Img_error_dir']
 _IMG_OLDLAYOUT_DIR = config['PATH']['Img_oldlayout_dir']
 # %%
 
-class StepsImage():#Attributes:→クラス内で定義された変数
+class StepsImage():
     """歩数の画像クラス
 
     Attributes:
@@ -78,14 +75,9 @@ class StepsImage():#Attributes:→クラス内で定義された変数
 
         #何度も呼び出し、さほどデータサイズも大きくないデータはクラス変数とする
         self.filepath = filepath
-        #self.filename = os.path.basename(self.filepath)
         self.fileext = os.path.splitext(self.filepath)[1].lower()
         #cv2.imreadは日本語ファイル名を読めない
-        #self.img_org = cv2.imread(self.filepath)
         self.img_org = cv2.imdecode(np.fromfile(self.filepath, dtype=np.uint8), cv2.IMREAD_COLOR)
-        # img_hsv = cv2. cvtColor(img_org, cv2. COLOR_BGR2HSV) #後に回す：明るさだけ変える方法を調べる
-        # self.img_org = cv2.cvtColor(img_hsv-img_hsv.min())/
-        # (img_hsv.max()-img_hsv.min(), cv2.COLOR_HSV2BGR)
         #読み込んだ画像をグレースケール形式に変換する
         self.img_org_gray = cv2.cvtColor(self.img_org, cv2.COLOR_BGR2GRAY)
         #最初のイメージの背景での上がどこにあるか検索している
@@ -126,9 +118,6 @@ class StepsImage():#Attributes:→クラス内で定義された変数
         Returns
             bool: True ダークモード, False 通常モード
         """
-        # ↓これは前のやつのとき白がダークと思われたかも？色みを替えたコード
-        #_, img = cv2.threshold(self.img_org_gray, 254, 255, cv2.THRESH_BINARY)
-        # 閾値以下の値を「0」それ以外の値を「最大値」として変換する方法？
         _, img = cv2.threshold(self.img_org_gray, 128, 255, cv2.THRESH_BINARY)
         return (cv2.countNonZero(img)/img.size < 0.3)
 
@@ -226,7 +215,7 @@ class StepsImage():#Attributes:→クラス内で定義された変数
             )
         """
 
-        #バイナリ化:オレンジ→黒、他→しろ
+        #バイナリ化:オレンジ→黒、他→白
         binary_img_graph, binary_black = orange_other_binarization(self.img_graph)
 
         #グラフの下の行のy座標を取得
@@ -321,10 +310,10 @@ def _get_lowest_graph_row(binary_black):
     #  max(binary_black[0])はバグってしまう (下しすぎになってしまう)
     # これを対応するため、なるべく黒が多い行の中からmaxを取る。
     #  こうすると、実際棒がある行からmaxを選択する
-    # 行ごとにオレンジ色なピクセルカウント
+    # 行ごとにオレンジ色のピクセルカウント
     frequent_black = sorted(zip(*np.unique(binary_black[0], return_counts=True)), key=lambda c: (c[1], c[0]),
                             reverse=True)
-    # オレンジの量上位10%多い行の中での一番下の行
+    # オレンジの量が多い上位10%の行から一番下の行を選択する
     bottom_y, _ = max(frequent_black[:len(frequent_black) // 10], key=lambda x: x[0])
     return bottom_y
 
@@ -367,7 +356,7 @@ def get_period_y_region(img_top):
         (int, int) -- (y軸From, To)
     """
 
-    #画像中の黒ドット部分の座標
+    #ヘッダー部分中からの黒ピクセルの座標
     search_img = img_top[:, 0:int(img_top.shape[1]*2/3)]
     black = np.unique(np.where(search_img == StepsImage.BIN_BLACK)[0])
 
@@ -390,7 +379,7 @@ def get_label_y_region(img_graph, start_x, end_x):
     Returns:
         (int, int): (y軸From, To)
     """
-    #走査する部分を切り出した画像中の黒ドット部分の座標
+    #歩数単位ラベルの中の黒ピクセルの座標
     search_img = img_graph[:, start_x+2:end_x]
     black = np.unique(np.where(search_img == StepsImage.BIN_BLACK)[0])
 
@@ -402,6 +391,7 @@ def get_label_y_region(img_graph, start_x, end_x):
             return 0, pre_idx + 7
         pre_idx = idx
     return 0, pre_idx
+
 
 def orange_other_binarization(img):
     """画像中のオレンジ系の箇所を黒, その他を白とする白黒2値に変換する
@@ -424,6 +414,7 @@ def get_black_pixels_per_line(image):
     """画像内に黒ピクセルが何個あるかを行ずつで数えている"""
     color_counts_per_line = [dict(zip(*np.unique(line, return_counts=True))) for line in image]
     return [counts.get(StepsImage.BIN_BLACK, 0) for counts in color_counts_per_line]
+
 
 def write_csv(path, header, data, encoding='utf8'):
     """CSV出力する
@@ -477,10 +468,6 @@ def extract_details(image: StepsImage):
         )
     """
 
-    #グラフの情報を取る
-    #bar_info, graph_x_range, graph_y_range = image.graph_info()
-    #image.bar_x_ranges, image.graph_x_range, image.graph_y_range = image.graph_info()
-
     #大津の２値化
     def binarize_otsu(img):
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -496,6 +483,7 @@ def extract_details(image: StepsImage):
 
     return period_img, period_text, label_img, label_text, max_height_pixel, heights
 
+
 def _get_period_img_and_text(image, binarize_otsu):
 
     #期間をOCRする
@@ -503,7 +491,7 @@ def _get_period_img_and_text(image, binarize_otsu):
     period_img = binarize_otsu(image.img_top[period_top:period_bottom, 0:int(image.img_bin_top_ocr.shape[1]*2/3)])
     period_text = TOOL.image_to_string(Image.fromarray(period_img),
                                        lang='script/Japanese',#言語は日本語
-                                       builder=pyocr.builders.TextBuilder(tesseract_layout=6))#画像の文字を抽出
+                                       builder=pyocr.builders.TextBuilder(tesseract_layout=6)) #画像の文字を抽出
     #tesseract_layoutは読み込みの精度を調節するプロパティで、0から10までの値を設定できる。文字一つ一つをブロックとして認識する6に設定。
     period_text = period_text.replace(' ','').replace('~', '～')
 
@@ -511,9 +499,8 @@ def _get_period_img_and_text(image, binarize_otsu):
 
 
 def _get_label_img_and_text(image, binarize_otsu):
-    #グラフの上
-    # 限値をOCRする
-    # グラフ右の線（点線）から写真の右いっぱいではなくその左の半分くらいまでのregion area（閾値）の中で、ラベルの上下を探す
+    # 歩数単位ラベルの上限値をOCRする
+    # グラフ右の線（点線）から写真の右端ではなくその左の半分くらいまでのregion area（閾値）の中で、ラベルの上下を探す
     label_top, label_bottom = get_label_y_region(image.img_bin_graph_ocr, image.graph_x_range[1], (image.graph_x_range[1] + image.img_bin_graph_ocr.shape[1]) // 2)
     label_img = binarize_otsu(image.img_graph[label_top:label_bottom, image.graph_x_range[1]+1 :])
     label_text = TOOL.image_to_string(Image.fromarray(label_img),
@@ -543,11 +530,12 @@ def _spread_bar_heights_across_date_range(image):
             s = bar[0] - image.bar_x_ranges[idx-1][1] - 1
             n = int((s - space_unit)/b_s_width)
         j += n
-        if (j >= len(heights)): break
+        if j >= len(heights): break
         heights[j] = bar[2]
         j += 1
 
     return heights
+
 
 def extract_image_details(index, file_, files, write_xl_args, error_results, error_header):
     filename = os.path.basename(file_)
@@ -593,6 +581,7 @@ def extract_image_details(index, file_, files, write_xl_args, error_results, err
             return
         shutil.copy(file_, _IMG_ERROR_DIR)
 
+
 def write_xl_row(img_period_path, img_period, img_label_path, img_label,
                  filename, period, label, max_height_pixel, heights, file_, index,
                  ni, results_map, header, max_width_period, max_width_label, ws, wb):
@@ -625,8 +614,7 @@ def write_xl_row(img_period_path, img_period, img_label_path, img_label,
 
     #棒グラフの高さを推測
     heights_xlsf = [f'=E{now_row}/F{now_row}*{i[1]}' for i in enumerate(heights)]
-    #record =  [image.filename, period, label, max_height_pixel] + heights.tolist()
-    record =  [filename, period, label, max_height_pixel] + heights_xlsf
+    record = [filename, period, label, max_height_pixel] + heights_xlsf
 
     #文字データのExcelへの埋め込み
     for i, h in enumerate(record):
@@ -637,11 +625,12 @@ def write_xl_row(img_period_path, img_period, img_label_path, img_label,
     results_map.append(dict(zip(header, record)))
     shutil.copy(file_, _IMG_SUCCESS_DIR)
 
-    #Excel Save 100件に1回
+    #Excel Save 100枚の画像を計算後まとめて保存
     if (index + 1) % 100 == 0:
         wb.save(_OUTPUT_EXCEL_PATH)
 
     return max_width_label, max_width_period
+
 
 def main():
     start_time = time.time()
@@ -686,7 +675,7 @@ def main():
 
     for args in extract_image_details_args:
         extract_image_details(*args)
-    # 同時実行(別にもっと早いでもない)
+    # 同時実行(特に今回は早くならなかった為不採用)
     # loop = asyncio.get_event_loop()
     # coroutines = [asyncio.to_thread(extract_image_details, *args) for args in extract_image_details_args]
     # loop.run_until_complete(asyncio.gather(*coroutines))
@@ -713,5 +702,5 @@ def main():
     print(f'Elapsed time: {time.time() - start_time} second.')
 
 
-if __name__== '__main__':
+if __name__ == '__main__':
     main()
