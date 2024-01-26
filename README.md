@@ -12,6 +12,7 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
 * Windows OS (64 bit) (Windows 10で動作確認済)
 * Python 3.6 (3.6.13で動作確認済)
   * https://www.python.org/downloads/
+  * ※ インストール時は必ず「Add python.exe to PATH」にチェックを入れてください
 * Tesseract (64 bit) (v5.0.0-alpha.20200328で動作確認済)
   - OCRソフト
   - インストーラは https://github.com/UB-Mannheim/tesseract/wiki から入手可能
