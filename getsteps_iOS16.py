@@ -22,6 +22,8 @@ plt.gray()
 #pyocrに対応したOCRソフトとしてtesseractだけがインストールされていることを想定する
 #pyocrにTesseractを指定する
 pyocr.tesseract.TESSERACT_CMD = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+# mac使用な方はこちらの行を使う
+# pyocr.tesseract.TESSERACT_CMD = r'/opt/homebrew/bin/tesseract'
 TOOLS = pyocr.get_available_tools()
 TOOL = TOOLS[0]
 
@@ -552,11 +554,9 @@ def extract_image_details(index, file_, files, write_xl_args, error_results, err
         if image.is_old_layout:
             raise AttributeError('Old layout.')
         img_period, period, img_label, label, max_height_pixel, heights = extract_details(image)
-        #OCRした部分の画像を出力
+
         img_period_path = _IMG_PERIOD_DIR + '/' + filename
         img_label_path = _IMG_LABEL_DIR + '/' + filename
-        cv2.imwrite(img_period_path, img_period)
-        cv2.imwrite(img_label_path, img_label)
 
         write_xl_args[index] = [img_period_path, img_period, img_label_path, img_label,
                                 filename, period, label, max_height_pixel, heights, file_, index]
@@ -673,12 +673,23 @@ def main():
     for index, file_ in enumerate(files):
         extract_image_details_args.append([index, file_, files, write_xl_args, error_results_map, error_header])
 
-    for args in extract_image_details_args:
-        extract_image_details(*args)
-    # 同時実行(特に今回は早くならなかった為不採用)
-    # loop = asyncio.get_event_loop()
-    # coroutines = [asyncio.to_thread(extract_image_details, *args) for args in extract_image_details_args]
-    # loop.run_until_complete(asyncio.gather(*coroutines))
+    # for args in extract_image_details_args:
+    #     extract_image_details(*args)
+    # 同時実行(連続実行と比べて、計算速度は少し上)
+    loop = asyncio.get_event_loop()
+    coroutines = [asyncio.to_thread(extract_image_details, *args) for args in extract_image_details_args]
+    loop.run_until_complete(asyncio.gather(*coroutines))
+
+    #OCRした部分の画像を出力
+    for _, write_xl_args_for_image in write_xl_args.items():
+        (img_period_path, img_period, img_label_path, img_label, filename,
+         period, label, max_height_pixel, heights, file_, index) = write_xl_args_for_image
+
+        img_period_path = _IMG_PERIOD_DIR + '/' + filename
+        img_label_path = _IMG_LABEL_DIR + '/' + filename
+
+        cv2.imwrite(img_period_path, img_period)
+        cv2.imwrite(img_label_path, img_label)
 
     for ni, (_, args) in enumerate(sorted(write_xl_args.items()), 1):
         max_width_label, max_width_period = write_xl_row(*args, ni, results, header, max_width_period, max_width_label, ws, wb)

@@ -15,6 +15,14 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
 * Tesseract (64 bit) (v5.0.0-alpha.20200328で動作確認済)
   - OCRソフト
   - インストーラは https://github.com/UB-Mannheim/tesseract/wiki から入手可能
+  - macOS:
+    ```
+    brew install tesseract tesseract-lang
+    ```
+    `getsteps_iOS16.py`に`pyocr.tesseract.TESSERACT_CMD`を変える
+    ```python
+    pyocr.tesseract.TESSERACT_CMD = r'/opt/homebrew/bin/tesseract'
+    ```
 
 ### Usage
 
