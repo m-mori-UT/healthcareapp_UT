@@ -39,3 +39,8 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
 
 旧ツール:
 https://github.com/HMAdachi-THK/healthcareapp-stepsreader
+
+
+#### Contributors
+
+森まりも, Craig Katsube, 足立浩基, 天笠志保, 鎌田正光
