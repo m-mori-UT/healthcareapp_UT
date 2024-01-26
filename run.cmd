@@ -9,7 +9,7 @@ set data_dir=config.ini
 echo [START]%time:~0,8%
 echo Running...
 
-python "getsteps_ini.py" %data_dir%
+python "getsteps_iOS16.py" %data_dir%
 
 echo [END]%time:~0,8% 
 echo.
