@@ -10,13 +10,15 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
 
 ### Requirement
 * Windows OS (64 bit) (Windows 10で動作確認済)
-* Python 3.6 (3.6.13で動作確認済)
+* Python 3.10 (3.10.7 で動作確認済)
   * https://www.python.org/downloads/
-  * ※ インストール時は必ず「Add python.exe to PATH」にチェックを入れてください
-* Tesseract (64 bit) (v5.0.0-alpha.20200328で動作確認済)
-  - OCRソフト
-  - インストーラは https://github.com/UB-Mannheim/tesseract/wiki から入手可能
-  - macOS:
+  * ※ インストール時は必ず「Add python.exe to PATH」にチェック
+    * 初めての方は「1.Pythonのインストール」の手順を参照ください：https://prog-8.com/docs/python-env-win
+  
+* Tesseract (64 bit) (v5.2.0-alpha.20220721 で動作確認済)
+  - （windows）OCRソフトインストーラを入手：https://github.com/UB-Mannheim/tesseract/wiki
+    * その際の全体手順（「Tesseract OCRのテスト」まで）：https://fickle-it.net/2023/04/tesseract-ocr-install-windows/
+  - （macOS）
     ```
     brew install tesseract tesseract-lang
     ```
@@ -25,19 +27,33 @@ iPhoneヘルスケアアプリ歩数読取ツール（以下、本ツール）�
     pyocr.tesseract.TESSERACT_CMD = r'/opt/homebrew/bin/tesseract'
     ```
 
+* Visual Studio Code（vscode）
+  * インストールから日本語表記変更までの手順：
+https://miya-system-works.com/blog/detail/vscode-install/
+  * ※他のエディタでも操作可能
+
+
 ### Usage
 
 1. Git Clone
+  * GitHubページの右上にある「Code」ボタンを展開すると「Download ZIP」ボタンからダウンロード可能
    ```shell
    git clone https://github.com/m-mori-UT/healthcareapp_UT.git
    ```
-2. Pythonパッケージ
+2. vscodeでダウンロードしたフォルダを開く
+  * vscodeで「healthcareapp_UT-main」フォルダを開く
+
+3. Pythonパッケージ
+  * vscode内のターミナルで下記のコマンドを実行し、必要なパッケージをインストール
+
     ```shell
     pip install -r requirements.txt
     ```
-3. データ準備
-   * 'data' フォルダに解析するヘルスケアアプリ画像を格納する
-4. 実行
+4. 画像データの準備
+  * 'data' フォルダに解析したい歩数グラフ画像を格納
+    * 細かくフォルダに分けた状態で画像データを格納する場合は、config.iniファイルの 'Data_dir = data'の後ろにフォルダ名を追加する
+      * 例）'Data_dir = data/xxx'
+5. 実行
    * run.cmdをダブルクリックする
      * venvを使っている方はrun.cmdのactivateコメントを省く
    * 実行結果は 'output' フォルダに出力される
