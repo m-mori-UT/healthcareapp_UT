@@ -35,24 +35,24 @@ https://miya-system-works.com/blog/detail/vscode-install/
 
 ### Usage
 
-1. Git Clone
-  * GitHubページの右上にある「Code」ボタンを展開すると「Download ZIP」ボタンからダウンロード可能
-   ```shell
-   git clone https://github.com/m-mori-UT/healthcareapp_UT.git
-   ```
+1. GitHubよりプログラムをダウンロード
+   * ページ上部にある緑の「Code」を展開し、「Download ZIP」からダウンロード可能
+
 2. vscodeでダウンロードしたフォルダを開く
-  * vscodeで「healthcareapp_UT-main」フォルダを開く
+    * vscodeで「healthcareapp_UT-main」フォルダを開く
 
 3. Pythonパッケージ
-  * vscode内のターミナルで下記のコマンドを実行し、必要なパッケージをインストール
+   * vscode内のターミナルで下記のコマンドを実行し、必要なパッケージをインストール
 
     ```shell
     pip install -r requirements.txt
     ```
+
 4. 画像データの準備
-  * 'data' フォルダに解析したい歩数グラフ画像を格納
-    * 細かくフォルダに分けた状態で画像データを格納する場合は、config.iniファイルの 'Data_dir = data'の後ろにフォルダ名を追加する
-      * 例）'Data_dir = data/xxx'
+    * 'data' フォルダに解析したい歩数グラフ画像を格納
+       * ※細かくフォルダに分けた状態で画像データを格納する場合は、config.iniファイルの 'Data_dir = data'の後ろにフォルダ名を追加する
+          * 例）'Data_dir = data/xxx'
+
 5. 実行
    * run.cmdをダブルクリックする
      * venvを使っている方はrun.cmdのactivateコメントを省く
